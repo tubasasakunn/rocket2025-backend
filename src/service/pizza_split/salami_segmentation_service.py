@@ -30,16 +30,17 @@ class SalamiSegmentationService:
  
 
 
-    # 高度な形態学的処理パラメータ（ノイズ除去・分離用）
-    H_MIN = -15                          # 色相の最小値
-    H_MAX = 45                        # 色相の最大値
-    S_MIN = 0                          # 彩度の最小値
-    S_MAX = 134                        # 彩度の最大値
-    V_MIN = 141                          # 明度の最小値
-    V_MAX = 241                        # 明度の最大値
+
+    # サラミ直接検出用のHSV範囲
+    H_MIN = 165  # 色相の最小値（330°÷2 = 紫赤の開始）
+    H_MAX = 10   # 色相の最大値（20°÷2 = 赤の終了、0をまたぐ）
+    S_MIN = 30   # 彩度の最小値（低めに設定）
+    S_MAX = 255  # 彩度の最大値（制限なし）
+    V_MIN = 50   # 明度の最小値（暗めのサラミも検出）
+    V_MAX = 140  # 明度の最大値（明るすぎる部分は除外）
     
     # 面積フィルタリング
-    MIN_CONTOUR_AREA = 2000              # サラミ片の最小面積（ピクセル）
+    MIN_CONTOUR_AREA = 1500              # サラミ片の最小面積（ピクセル）
     
     # サラミ色サンプル（RGB値：ヒストグラム平坦化前）
     PIZZA1_SALAMI_COLORS = [(116,53,45), (129,68,61), (104,51,37), (168,114,104)]
@@ -147,7 +148,7 @@ class SalamiSegmentationService:
         s_min, s_max = s_range
         v_min, v_max = v_range
         
-        # 色相が0をまたぐ場合（例: 170-10）
+        # 色相が0をまたぐ場合の判定
         if h_min > h_max:
             # 2つのマスクを作成して結合
             # マスク1: h_min～179の範囲
@@ -167,8 +168,8 @@ class SalamiSegmentationService:
             upper_bound = np.array([h_max, s_max, v_max])
             mask = cv2.inRange(hsv_image, lower_bound, upper_bound)
         
-        # マスクを反転
-        return cv2.bitwise_not(mask)
+        # マスクを反転しない（サラミ部分が白になる）
+        return mask
 
     def _fill_holes_only(self, mask: np.ndarray) -> np.ndarray:
         """穴だけを埋める（領域を接続しない）"""
