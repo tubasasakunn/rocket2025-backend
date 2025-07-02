@@ -262,32 +262,90 @@ class PostprocessService:
                 stroke_width=4
             ))
         
-        # ピース番号を表示
+        dwg.save()
+        return output_path
+    
+    def create_svg_content_on_original(self, original_image_path: str, 
+                                     pizza_center_normalized: Tuple[float, float],
+                                     pizza_radius_normalized: float,
+                                     salami_circles_normalized: List[Tuple[Tuple[float, float], float]],
+                                     cut_edges: List[Tuple[Tuple[float, float], Tuple[float, float]]],
+                                     preprocess_info: Dict,
+                                     n_pieces: int = 4) -> str:
+        """
+        元の画像にオーバーレイするSVGコンテンツを作成（ファイル保存なし）
+        
+        Args:
+            original_image_path: 元の画像パス
+            pizza_center_normalized: 正規化されたピザ中心
+            pizza_radius_normalized: 正規化されたピザ半径
+            salami_circles_normalized: 正規化されたサラミ円情報
+            cut_edges: カット線情報（正規化座標系）
+            preprocess_info: 前処理情報
+            n_pieces: ピース数
+            
+        Returns:
+            生成されたSVGコンテンツ（XML文字列）
+        """
+        # 元の画像サイズを取得
+        img = cv2.imread(original_image_path)
+        height, width = img.shape[:2]
+        
+        # ピザの円を逆変換
+        pizza_center_original, pizza_radius_original = self.inverse_transform_circle(
+            pizza_center_normalized, pizza_radius_normalized, preprocess_info
+        )
+        
+        # サラミを逆変換
+        salami_circles_original = []
+        for (cx, cy), r in salami_circles_normalized:
+            center_original, radius_original = self.inverse_transform_circle(
+                (cx, cy), r, preprocess_info
+            )
+            salami_circles_original.append((center_original, radius_original))
+        
+        # カット線を逆変換
+        cut_edges_original = self.inverse_transform_cut_edges(
+            cut_edges, pizza_center_normalized, pizza_radius_normalized, preprocess_info
+        )
+        
+        # SVGを文字列として構築
+        svg_lines = []
+        svg_lines.append(f'<?xml version="1.0" encoding="utf-8" ?>')
+        svg_lines.append(f'<svg baseProfile="full" height="{height}" version="1.1" width="{width}" xmlns="http://www.w3.org/2000/svg" xmlns:ev="http://www.w3.org/2001/xml-events" xmlns:xlink="http://www.w3.org/1999/xlink">')
+        svg_lines.append(f'<defs />')
+        
+        # 背景画像を埋め込み
+        svg_lines.append(f'<image height="{height}" width="{width}" x="0" y="0" xlink:href="{original_image_path}" />')
+        
+        # ピザの楕円を描画（元の楕円形状を使用）
         if preprocess_info['is_transformed'] and preprocess_info['ellipse_params']:
             ellipse = preprocess_info['ellipse_params']
             cx, cy = ellipse['center']
+            rx = ellipse['major_axis']
+            ry = ellipse['minor_axis']
+            angle = ellipse['angle']
             
-            angle_step = 2 * np.pi / n_pieces
-            for i in range(n_pieces):
-                angle = i * angle_step + angle_step / 2
-                # 楕円上の点を計算
-                text_radius = min(ellipse['major_axis'], ellipse['minor_axis']) * 0.5
-                text_x = cx + text_radius * np.cos(angle)
-                text_y = cy + text_radius * np.sin(angle)
-                
-                dwg.add(dwg.text(
-                    str(i + 1),
-                    insert=(text_x, text_y),
-                    text_anchor='middle',
-                    font_size=20,
-                    font_weight='bold',
-                    fill='white',
-                    stroke='black',
-                    stroke_width=1
-                ))
+            # SVGの楕円要素として追加
+            svg_lines.append(f'<ellipse cx="{cx}" cy="{cy}" fill="none" rx="{rx}" ry="{ry}" stroke="brown" stroke-width="3" transform="rotate({angle} {cx} {cy})" />')
+        else:
+            # 円として描画
+            svg_lines.append(f'<circle cx="{pizza_center_original[0]}" cy="{pizza_center_original[1]}" fill="none" r="{pizza_radius_original}" stroke="brown" stroke-width="3" />')
         
-        dwg.save()
-        return output_path
+        # サラミを描画
+        for (cx, cy), r in salami_circles_original:
+            svg_lines.append(f'<circle cx="{cx}" cy="{cy}" fill="indianred" fill-opacity="0.7" r="{r}" stroke="darkred" stroke-width="2" />')
+        
+        # カット線を描画
+        for (p1, p2) in cut_edges_original:
+            svg_lines.append(f'<line stroke="black" stroke-width="4" x1="{p1[0]}" x2="{p2[0]}" y1="{p1[1]}" y2="{p2[1]}" />')
+        
+        svg_lines.append('</svg>')
+        
+        # SVGコンテンツを結合
+        svg_content = '\n'.join(svg_lines)
+        
+        return svg_content
     
     def create_overlay_image_on_original(self, original_image_path: str,
                                        pizza_center_normalized: Tuple[float, float],
@@ -367,24 +425,6 @@ class PostprocessService:
         )
         for (p1, p2) in cut_edges_original:
             ax.plot([p1[0], p2[0]], [p1[1], p2[1]], 'k-', linewidth=3)
-        
-        # ピース番号を表示
-        if preprocess_info['is_transformed'] and preprocess_info['ellipse_params']:
-            ellipse = preprocess_info['ellipse_params']
-            cx, cy = ellipse['center']
-            
-            angle_step = 2 * np.pi / n_pieces
-            for i in range(n_pieces):
-                angle = i * angle_step + angle_step / 2
-                # 楕円上の点を計算
-                text_radius = min(ellipse['major_axis'], ellipse['minor_axis']) * 0.5
-                text_x = cx + text_radius * np.cos(angle)
-                text_y = cy + text_radius * np.sin(angle)
-                
-                ax.text(text_x, text_y, str(i + 1),
-                       fontsize=20, fontweight='bold', color='white',
-                       bbox=dict(boxstyle='circle', facecolor='black', alpha=0.7),
-                       ha='center', va='center')
         
         ax.set_title(f'Pizza Division Result on Original Image ({n_pieces} pieces)', fontsize=16)
         ax.axis('off')

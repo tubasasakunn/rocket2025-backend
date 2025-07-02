@@ -44,7 +44,7 @@ class PizzaProcessor:
         self.pizza_detector = PizzaCircleDetectionService()
         self.salami_detector = SalamiCircleDetectionService()
         
-    def process_image(self, image_path, n_pieces=4, debug=False):
+    def process_image(self, image_path, n_pieces=4, debug=False, return_svg_only=False, quiet=False):
         """
         画像を処理してピザを分割
         
@@ -52,6 +52,8 @@ class PizzaProcessor:
             image_path: 入力画像パス
             n_pieces: 分割するピース数
             debug: デバッグ出力有効化
+            return_svg_only: SVGのみを生成して早期リターンするか
+            quiet: 標準出力を抑制するか
             
         Returns:
             dict: 処理結果
@@ -60,35 +62,43 @@ class PizzaProcessor:
         if not image_path.exists():
             raise FileNotFoundError(f"画像ファイルが見つかりません: {image_path}")
         
-        print(f"\n=== ピザ分割処理開始: {image_path.name} ===")
+        if not quiet:
+            print(f"\n=== ピザ分割処理開始: {image_path.name} ===")
         
         # 1. 前処理（楕円→円形変換）
-        print("\n1. 画像前処理...")
+        if not quiet:
+            print("\n1. 画像前処理...")
         preprocessed_path = self.output_dir / f"preprocessed_{self.timestamp}_{image_path.name}"
         preprocessed_img, preprocess_info = self.preprocess_service.preprocess_pizza_image(
             str(image_path), 
             str(preprocessed_path),
             is_debug=debug
         )
-        print(f"   前処理完了: {preprocessed_path.name}")
+        if not quiet:
+            print(f"   前処理完了: {preprocessed_path.name}")
         
         # 2. ピザの円検出
-        print("\n2. ピザ円検出...")
+        if not quiet:
+            print("\n2. ピザ円検出...")
         pizza_center, pizza_radius = self.pizza_detector.detect_circle_from_image(
             str(preprocessed_path)
         )
-        print(f"   ピザ中心: ({pizza_center[0]:.1f}, {pizza_center[1]:.1f})")
-        print(f"   ピザ半径: {pizza_radius:.1f}px")
+        if not quiet:
+            print(f"   ピザ中心: ({pizza_center[0]:.1f}, {pizza_center[1]:.1f})")
+            print(f"   ピザ半径: {pizza_radius:.1f}px")
         
         # 3. サラミの円検出
-        print("\n3. サラミ円検出...")
+        if not quiet:
+            print("\n3. サラミ円検出...")
         salami_circles = self.salami_detector.detect_salami_circles(
             str(preprocessed_path)
         )
-        print(f"   検出されたサラミ数: {len(salami_circles)}")
+        if not quiet:
+            print(f"   検出されたサラミ数: {len(salami_circles)}")
         
         # 4. 座標を正規化（ピザ中心を原点、半径を1に）
-        print("\n4. 座標正規化...")
+        if not quiet:
+            print("\n4. 座標正規化...")
         normalized_salami = []
         salami_radii = []
         
@@ -102,10 +112,12 @@ class PizzaProcessor:
         
         # サラミ半径の平均値を計算
         avg_salami_radius = np.mean(salami_radii) if salami_radii else 0.1
-        print(f"   正規化サラミ半径（平均）: {avg_salami_radius:.4f}")
+        if not quiet:
+            print(f"   正規化サラミ半径（平均）: {avg_salami_radius:.4f}")
         
         # 5. 移動ナイフ法で分割
-        print(f"\n5. 移動ナイフ法による{n_pieces}分割...")
+        if not quiet:
+            print(f"\n5. 移動ナイフ法による{n_pieces}分割...")
         divider = PizzaDivider(
             R_pizza=1.0,
             R_salami=avg_salami_radius,
@@ -133,8 +145,13 @@ class PizzaProcessor:
         divider.calculate_targets()
         divider.divide_pizza()
         
+        # quietモードでは結果出力をスキップ
+        if quiet:
+            divider.print_results = lambda: None
+        
         # 6. SVGオーバーレイ生成（前処理済み画像用）
-        print("\n6. SVGオーバーレイ生成...")
+        if not quiet:
+            print("\n6. SVGオーバーレイ生成...")
         svg_preprocessed_path = self.create_svg_overlay(
             preprocessed_path,
             pizza_center,
@@ -145,7 +162,8 @@ class PizzaProcessor:
         )
         
         # 7. 元の画像用のSVGオーバーレイ生成
-        print("\n7. 元の画像用SVGオーバーレイ生成...")
+        if not quiet:
+            print("\n7. 元の画像用SVGオーバーレイ生成...")
         svg_original_path = self.output_dir / f"overlay_original_{self.timestamp}.svg"
         self.postprocess_service.create_svg_overlay_on_original(
             str(image_path),
@@ -158,8 +176,37 @@ class PizzaProcessor:
             n_pieces
         )
         
+        # SVGのみ返すモードの場合は早期リターン
+        if return_svg_only:
+            # SVGコンテンツを直接生成
+            svg_content = self.postprocess_service.create_svg_content_on_original(
+                str(image_path),
+                pizza_center,
+                pizza_radius,
+                salami_circles,
+                divider.cut_edges,
+                preprocess_info,
+                n_pieces
+            )
+            
+            if not quiet:
+                print(f"\n=== 処理完了（SVGのみ） ===")
+                print(f"元画像用SVG: 生成済み")
+            
+            return {
+                'svg_original': str(svg_original_path),
+                'svg_content': svg_content,
+                'pizza_center': pizza_center,
+                'pizza_radius': pizza_radius,
+                'salami_circles': salami_circles,
+                'cut_edges': divider.cut_edges,
+                'pieces': divider.pieces,
+                'preprocess_info': preprocess_info
+            }
+        
         # 8. 元の画像にオーバーレイしたPNG画像生成
-        print("\n8. 元の画像にオーバーレイしたPNG画像生成...")
+        if not quiet:
+            print("\n8. 元の画像にオーバーレイしたPNG画像生成...")
         result_original_path = self.output_dir / f"result_original_{self.timestamp}.png"
         self.postprocess_service.create_overlay_image_on_original(
             str(image_path),
@@ -173,7 +220,8 @@ class PizzaProcessor:
         )
         
         # 9. 結果画像生成
-        print("\n9. 結果画像生成...")
+        if not quiet:
+            print("\n9. 結果画像生成...")
         result_path = self.create_result_image(
             preprocessed_path,
             pizza_center,
@@ -185,12 +233,13 @@ class PizzaProcessor:
             divider.py
         )
         
-        print(f"\n=== 処理完了 ===")
-        print(f"前処理画像: {preprocessed_path}")
-        print(f"前処理済み画像用SVG: {svg_preprocessed_path}")
-        print(f"元画像用SVG: {svg_original_path}")
-        print(f"元画像にオーバーレイしたPNG: {result_original_path}")
-        print(f"結果画像: {result_path}")
+        if not quiet:
+            print(f"\n=== 処理完了 ===")
+            print(f"前処理画像: {preprocessed_path}")
+            print(f"前処理済み画像用SVG: {svg_preprocessed_path}")
+            print(f"元画像用SVG: {svg_original_path}")
+            print(f"元画像にオーバーレイしたPNG: {result_original_path}")
+            print(f"結果画像: {result_path}")
         
         return {
             'preprocessed_image': str(preprocessed_path),
@@ -270,24 +319,6 @@ class PizzaProcessor:
                 end=(x2, y2),
                 stroke='black',
                 stroke_width=4
-            ))
-        
-        # ピース番号を表示（オプション）
-        angle_step = 2 * np.pi / n_pieces
-        for i in range(n_pieces):
-            angle = i * angle_step + angle_step / 2
-            text_x = pizza_center[0] + 0.5 * pizza_radius * np.cos(angle)
-            text_y = pizza_center[1] + 0.5 * pizza_radius * np.sin(angle)
-            
-            dwg.add(dwg.text(
-                str(i + 1),
-                insert=(text_x, text_y),
-                text_anchor='middle',
-                font_size=20,
-                font_weight='bold',
-                fill='white',
-                stroke='black',
-                stroke_width=1
             ))
         
         dwg.save()

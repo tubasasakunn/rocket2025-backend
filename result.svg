@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<svg baseProfile="full" height="635" version="1.1" width="635" xmlns="http://www.w3.org/2000/svg" xmlns:ev="http://www.w3.org/2001/xml-events" xmlns:xlink="http://www.w3.org/1999/xlink">
+<defs />
+<image height="635" width="635" x="0" y="0" xlink:href="/var/folders/tk/8ny217rs6k37x89pc1npzf140000gp/T/tmpvx8ggba7.jpg" />
+<ellipse cx="329" cy="342" fill="none" rx="303" ry="255" stroke="brown" stroke-width="3" transform="rotate(23.474090576171875 329 342)" />
+<circle cx="312.9332644640719" cy="153.0391071261531" fill="indianred" fill-opacity="0.7" r="43.59375000000001" stroke="darkred" stroke-width="2" />
+<circle cx="493.9349502730689" cy="247.57134603750927" fill="indianred" fill-opacity="0.7" r="46.86328125000001" stroke="darkred" stroke-width="2" />
+<circle cx="147.8143312646354" cy="279.131924984277" fill="indianred" fill-opacity="0.7" r="59.94140625000001" stroke="darkred" stroke-width="2" />
+<circle cx="249.2585827110907" cy="352.59220737749706" fill="indianred" fill-opacity="0.7" r="62.12109375000001" stroke="darkred" stroke-width="2" />
+<circle cx="487.95242254019695" cy="450.54977408633187" fill="indianred" fill-opacity="0.7" r="61.03125000000001" stroke="darkred" stroke-width="2" />
+<line stroke="black" stroke-width="4" x1="108.75269061994305" x2="320.9997114234129" y1="496.1042204269174" y2="72.98147873202578" />
+<line stroke="black" stroke-width="4" x1="552.0508388536281" x2="320.9241809524706" y1="187.54398399567347" y2="603.2320763646819" />
+<line stroke="black" stroke-width="4" x1="305.1732341281619" x2="353.0979248624612" y1="71.89001312451" y2="605.9410277296165" />
+<text fill="white" font-size="20" font-weight="bold" stroke="black" stroke-width="1" text-anchor="middle" x="419.1561146012848" y="432.1561146012848">1</text>
+<text fill="white" font-size="20" font-weight="bold" stroke="black" stroke-width="1" text-anchor="middle" x="238.8438853987152" y="432.1561146012848">2</text>
+<text fill="white" font-size="20" font-weight="bold" stroke="black" stroke-width="1" text-anchor="middle" x="238.84388539871517" y="251.8438853987152">3</text>
+<text fill="white" font-size="20" font-weight="bold" stroke="black" stroke-width="1" text-anchor="middle" x="419.1561146012848" y="251.84388539871517">4</text>
+</svg>
