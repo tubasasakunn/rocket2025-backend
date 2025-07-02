@@ -7,8 +7,8 @@ import base64
 import time
 import json
 
-from service.paypay.split_payment_service import SplitPaymentService
-from service.paypay.settings import get_paypay_settings
+from src.service.paypay.split_payment_service import SplitPaymentService
+from src.service.paypay.settings import get_paypay_settings
 
 
 # モデル定義

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from api.paypay_router import router as paypay_router
+from src.api.paypay_router import router as paypay_router
 
 
 # FastAPI アプリケーションの作成
