@@ -6,7 +6,21 @@ from pathlib import Path
 
 class PizzaSegmentationService:
     def __init__(self):
-        self.model = YOLO('yolov8n-seg.pt')
+        import os
+        # プロジェクトルートのモデルファイルまたはサービスディレクトリのモデルファイルを使用
+        root_model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'yolov8n-seg.pt')
+        local_model_path = os.path.join(os.path.dirname(__file__), 'yolov8n-seg.pt')
+        
+        # いずれかのパスが存在するファイルを使用
+        if os.path.exists(local_model_path):
+            model_path = local_model_path
+        elif os.path.exists(root_model_path):
+            model_path = root_model_path
+        else:
+            # どちらも存在しない場合はデフォルトのモデル名を使用（Ultralytics Hubからダウンロード）
+            model_path = 'yolov8n-seg.pt'
+            
+        self.model = YOLO(model_path)
         self.pizza_class_id = 53
     
     def segment_pizza(self, image_path: str) -> np.ndarray:

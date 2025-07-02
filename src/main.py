@@ -1,8 +1,21 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import os
+import sys
 
-from src.api.paypay_router import router as paypay_router
+# 正しいインポートパスを設定
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
+try:
+    from src.api.paypay_router import router as paypay_router
+    from src.api.pizza_cutter_router import router as pizza_cutter_router
+except ImportError:
+    # ローカル環境での相対インポート
+    from api.paypay_router import router as paypay_router
+    from api.pizza_cutter_router import router as pizza_cutter_router
 
 
 # FastAPI アプリケーションの作成
@@ -23,6 +36,7 @@ app.add_middleware(
 
 # ルーターの登録
 app.include_router(paypay_router, prefix="/api")
+app.include_router(pizza_cutter_router, prefix="/api")
 
 
 # ルートエンドポイント
