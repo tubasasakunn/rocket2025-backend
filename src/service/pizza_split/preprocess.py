@@ -282,6 +282,9 @@ class PreprocessService:
         
         # Transform image
         transformed = self.transform_image_to_circular(image, ellipse_params)
+
+        # 512x512 normalization
+        normalized = self.normalize_to_512x512(transformed, (center_x, center_y), minor_axis)
         
         info['is_transformed'] = True
         info['transformation_applied'] = {
@@ -292,10 +295,10 @@ class PreprocessService:
         # Save if output path provided
         if output_path:
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            cv2.imwrite(output_path, transformed)
+            cv2.imwrite(output_path, normalized)
             print(f"Saved preprocessed image to {output_path}")
         
-        return transformed, info
+        return normalized, info
 
 
 if __name__ == "__main__":

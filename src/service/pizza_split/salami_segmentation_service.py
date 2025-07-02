@@ -27,16 +27,16 @@ class SalamiSegmentationService:
     # 基本形態学的処理パラメータ
     BASIC_KERNEL_SIZE = 32             # 基本カーネルサイズ
     
+ 
+
+
     # 高度な形態学的処理パラメータ（ノイズ除去・分離用）
-    THIN_LINE_KERNEL_SIZE = 7            # 細線除去カーネルサイズ
-    THIN_LINE_ITERATIONS = 2             # 細線除去反復回数
-    SEPARATION_KERNEL1_SIZE = 15         # 第1分離カーネルサイズ（楕円）
-    SEPARATION_KERNEL1_ITERATIONS = 2    # 第1分離反復回数
-    SEPARATION_KERNEL2_SIZE = 7          # 第2分離カーネルサイズ（十字）
-    SEPARATION_KERNEL2_ITERATIONS = 2    # 第2分離反復回数
-    RECOVERY_KERNEL_SIZE = 9             # 復元カーネルサイズ
-    RECOVERY_ITERATIONS = 2              # 復元反復回数
-    CLEANUP_KERNEL_SIZE = 5              # 最終クリーンアップカーネルサイズ
+    H_MIN = -15                          # 色相の最小値
+    H_MAX = 45                        # 色相の最大値
+    S_MIN = 0                          # 彩度の最小値
+    S_MAX = 134                        # 彩度の最大値
+    V_MIN = 141                          # 明度の最小値
+    V_MAX = 241                        # 明度の最大値
     
     # 面積フィルタリング
     MIN_CONTOUR_AREA = 2000              # サラミ片の最小面積（ピクセル）
@@ -47,26 +47,64 @@ class SalamiSegmentationService:
     
     def __init__(self):
         pass
-    
-    def _apply_preprocessing(self, image: np.ndarray) -> np.ndarray:
-        """画像前処理：バイラテラルフィルタ + ヒストグラム平坦化"""
-        # エッジ保持平滑化
-        smoothed = cv2.bilateralFilter(image, self.BILATERAL_D, 
-                                     self.BILATERAL_SIGMA_COLOR, self.BILATERAL_SIGMA_SPACE)
+
+    def _apply_preprocessing(self, image: np.ndarray, mask: np.ndarray = None) -> np.ndarray:
+        """画像前処理：ガウスフィルタ + バイラテラルフィルタ + ヒストグラム平坦化（マスク対応）"""
         
-        # チャンネル分離
-        b, g, r = cv2.split(smoothed)
+        # 1. ガウスフィルタでノイズ除去（最初のぼかし処理）
+        # 注：クラス定数として以下を追加することを推奨
+        # GAUSSIAN_KERNEL_SIZE = (5, 5)  # ガウスフィルタのカーネルサイズ
+        # GAUSSIAN_SIGMA = 1.5            # ガウスフィルタの標準偏差
+        gaussian_kernel_size = (25, 25)  # カーネルサイズ（奇数値を使用）
+        gaussian_sigma = 3           # 標準偏差
+        blurred = cv2.GaussianBlur(image, gaussian_kernel_size, gaussian_sigma)
         
-        # CLAHE（適応ヒストグラム平坦化）適用
-        clahe = cv2.createCLAHE(clipLimit=self.CLAHE_CLIP_LIMIT, 
-                               tileGridSize=self.CLAHE_TILE_GRID_SIZE)
-        b_eq = clahe.apply(b)
-        g_eq = clahe.apply(g)
-        r_eq = clahe.apply(r)
+        # 2. バイラテラルフィルタでエッジ保持平滑化
+        smoothed = cv2.bilateralFilter(blurred, self.BILATERAL_D, 
+                                    self.BILATERAL_SIGMA_COLOR, self.BILATERAL_SIGMA_SPACE)
         
-        # チャンネル結合
-        return cv2.merge([b_eq, g_eq, r_eq])
-    
+        # 3. マスク対応のヒストグラム平坦化
+        if mask is None:
+            # マスクがない場合は画像全体に適用
+            b, g, r = cv2.split(smoothed)
+            clahe = cv2.createCLAHE(clipLimit=self.CLAHE_CLIP_LIMIT, 
+                                tileGridSize=self.CLAHE_TILE_GRID_SIZE)
+            b_eq = clahe.apply(b)
+            g_eq = clahe.apply(g)
+            r_eq = clahe.apply(r)
+            return cv2.merge([b_eq, g_eq, r_eq])
+        else:
+            # マスク領域のみヒストグラム平坦化
+            result = smoothed.copy()
+            
+            # マスク領域の境界ボックスを取得
+            coords = np.where(mask > 0)
+            if len(coords[0]) == 0:
+                return result
+                
+            min_y, max_y = coords[0].min(), coords[0].max()
+            min_x, max_x = coords[1].min(), coords[1].max()
+            
+            # ROI抽出
+            roi = smoothed[min_y:max_y+1, min_x:max_x+1]
+            roi_mask = mask[min_y:max_y+1, min_x:max_x+1]
+            
+            # 各チャンネルに対してマスク付きCLAHE適用
+            b, g, r = cv2.split(roi)
+            clahe = cv2.createCLAHE(clipLimit=self.CLAHE_CLIP_LIMIT, 
+                                tileGridSize=self.CLAHE_TILE_GRID_SIZE)
+            
+            b_eq = clahe.apply(b)
+            g_eq = clahe.apply(g)
+            r_eq = clahe.apply(r)
+            
+            roi_eq = cv2.merge([b_eq, g_eq, r_eq])
+            
+            # マスク領域のみ結果に反映
+            result[min_y:max_y+1, min_x:max_x+1][roi_mask > 0] = roi_eq[roi_mask > 0]
+            
+            return result
+
     def _calculate_hsv_color_range(self, rgb_colors: list) -> tuple:
         """RGB色サンプルから前処理済みHSV範囲を計算"""
         hsv_values = []
@@ -201,16 +239,14 @@ class SalamiSegmentationService:
         masked_image = cv2.bitwise_and(image, image, mask=pizza_mask)
         
         # 2. 前処理（バイラテラルフィルタ + ヒストグラム平坦化）
-        preprocessed = self._apply_preprocessing(masked_image)
+        preprocessed = self._apply_preprocessing(masked_image,pizza_mask)
         
         # 3. HSV色空間変換
         hsv = cv2.cvtColor(preprocessed, cv2.COLOR_BGR2HSV)
         
         # 4. サラミ色範囲の計算
         all_salami_colors = self.PIZZA1_SALAMI_COLORS + self.PIZZA2_SALAMI_COLORS
-        (h_min, h_max), (s_min, s_max), (v_min, v_max) = self._calculate_hsv_color_range(all_salami_colors)
         
-        print(f"  HSV範囲: H({h_min}-{h_max}), S({s_min}-{s_max}), V({v_min}-{v_max})")
 
         # デバッグ用：色検出前の画像を保存
         if debug_output_dir and base_name:
@@ -218,7 +254,9 @@ class SalamiSegmentationService:
             cv2.imwrite(str(preprocessed_path), preprocessed)
         
         # 5. 色マスクの作成
-        color_mask = cv2.bitwise_and(self._create_color_mask(hsv, (h_min, h_max), (s_min, s_max), (v_min, v_max)), pizza_mask)
+        color_mask = cv2.bitwise_and(self._create_color_mask(hsv, (self.H_MIN,self.H_MAX),
+                                                              (self.S_MIN,self.S_MAX), 
+                                                              (self.V_MIN,self.V_MAX)), pizza_mask)
     
         
         # デバッグ用：色検出後のマスクを保存（サラミが白）
@@ -267,6 +305,7 @@ class SalamiSegmentationService:
         image = cv2.imread(image_path)
         if image is None:
             raise ValueError(f"画像が読み込めません: {image_path}")
+        
         
         # ピザマスクが未提供の場合は取得
         if pizza_mask is None:
