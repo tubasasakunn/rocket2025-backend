@@ -12,7 +12,7 @@ from preprocess import PreprocessService
 
 
 class SalamiCircleDetectionService:
-    """ピザ画像からサラミの円形領域を検出するサービス"""
+    """ピザ画像からサラミの円形領域を検出するサービスクラス"""
     
     # 定数定義
     MIN_AREA_THRESHOLD = 200  # 最小面積閾値
@@ -31,7 +31,8 @@ class SalamiCircleDetectionService:
         self, 
         mask: np.ndarray, 
         debug_output_dir: Optional[Path] = None, 
-        base_name: str = ""
+        base_name: str = "",
+        isDebug: bool = False
     ) -> List[Tuple[Tuple[int, int], int]]:
         """
         バイナリマスクから円形領域を検出（縮小処理による分割判定）
@@ -40,22 +41,34 @@ class SalamiCircleDetectionService:
             mask: バイナリマスク（0または255の値）
             debug_output_dir: デバッグ画像を保存するディレクトリ
             base_name: デバッグ画像のベース名
+            isDebug: デバッグモード（Trueの場合、途中経過を保存）
             
         Returns:
             各要素が((中心X座標, 中心Y座標), 半径)のタプルのリスト
         """
+        if isDebug:
+            print("[DEBUG] バイナリマスクから円検出を開始")
         # マスクを8ビットに変換
         mask = self._ensure_uint8(mask)
+        
+        if isDebug:
+            print(f"[DEBUG] マスクのピクセル数: {np.sum(mask == 255)}")
         
         # 距離変換を実行
         dist_transform = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
         
+        if isDebug:
+            print(f"[DEBUG] 距離変換の最大値: {dist_transform.max():.2f}")
+        
         # デバッグ画像の保存
-        if debug_output_dir and base_name:
+        if debug_output_dir and base_name and isDebug:
             self._save_distance_transform(dist_transform, debug_output_dir, base_name)
         
         # 連結成分を検出
         num_labels, labels = cv2.connectedComponents(mask)
+        
+        if isDebug:
+            print(f"[DEBUG] {num_labels - 1}個の連結成分を検出")
         
         circles = []
         
@@ -67,12 +80,21 @@ class SalamiCircleDetectionService:
             
             # この領域の最大距離値を取得
             max_dist = label_dist.max()
+            
+            if isDebug:
+                print(f"[DEBUG] ラベル{label}: 最大距離={max_dist:.2f}")
+            
             if max_dist < self.MIN_RADIUS:
+                if isDebug:
+                    print(f"[DEBUG]   -> スキップ (最小半径{self.MIN_RADIUS}未満)")
                 continue
             
             # 縮小処理による分割判定
-            sub_circles = self._detect_circles_by_erosion(label_mask, label_dist, max_dist)
+            sub_circles = self._detect_circles_by_erosion(label_mask, label_dist, max_dist, isDebug)
             circles.extend(sub_circles)
+        
+        if isDebug:
+            print(f"[DEBUG] 合計{len(circles)}個の円を検出")
         
         return circles
     
@@ -80,41 +102,62 @@ class SalamiCircleDetectionService:
         self, 
         mask: np.ndarray, 
         dist_transform: np.ndarray,
-        max_dist: float
+        max_dist: float,
+        isDebug: bool = False
     ) -> List[Tuple[Tuple[int, int], int]]:
-        """縮小処理により領域を分割して円を検出"""
+        """
+        縮小処理により領域を分割して円を検出
+        
+        Args:
+            mask: バイナリマスク
+            dist_transform: 距離変換
+            max_dist: 最大距離値
+            isDebug: デバッグモード
+            
+        Returns:
+            検出された円のリスト
+        """
         circles = []
         
         # 最大距離の80%以上の領域を抽出
         threshold = max_dist * 0.8
         high_dist_mask = (dist_transform >= threshold).astype(np.uint8) * 255
         
-        # デバッグ用：80%以上の領域を保存
-        # if debug_output_dir and base_name:
-        #     self._save_debug_image(high_dist_mask, debug_output_dir, base_name, "80%領域")
+        if isDebug:
+            print(f"[DEBUG] 80%閾値: {threshold:.2f}")
         
         # 連結成分を検出（80%領域での分割判定）
         num_sub_labels, sub_labels = cv2.connectedComponents(high_dist_mask)
         
+        if isDebug:
+            print(f"[DEBUG] 80%領域で{num_sub_labels - 1}個のサブ領域を検出")
+        
         if num_sub_labels <= 1:
             # 分割されなかった場合（背景のみ、または縮小で消えた場合）
             # 元のマスク全体を1つの円として処理
-            circle = self._create_circle_from_single_region(mask, dist_transform)
+            if isDebug:
+                print("[DEBUG] 分割されなかったため、全体を1つの円として処理")
+            
+            circle = self._create_circle_from_single_region(mask, dist_transform, isDebug)
             if circle:
                 circles.append(circle)
         else:
             # 複数の領域に分割された場合
             # 各分割領域を個別の円として処理
+            if isDebug:
+                print(f"[DEBUG] {num_sub_labels - 1}個のサブ領域を個別に処理")
+            
             for sub_label in range(1, num_sub_labels):
                 # 80%領域の各部分に対応する元のマスク領域を抽出
                 sub_region_mask = self._expand_region_to_original(
-                    mask, sub_labels, sub_label, dist_transform
+                    mask, sub_labels, sub_label, dist_transform, isDebug
                 )
                 
                 if sub_region_mask is not None:
                     circle = self._create_circle_from_single_region(
                         sub_region_mask, 
-                        dist_transform * (sub_region_mask > 0)
+                        dist_transform * (sub_region_mask > 0),
+                        isDebug
                     )
                     if circle:
                         circles.append(circle)
@@ -126,9 +169,22 @@ class SalamiCircleDetectionService:
         original_mask: np.ndarray,
         sub_labels: np.ndarray,
         target_label: int,
-        dist_transform: np.ndarray
+        dist_transform: np.ndarray,
+        isDebug: bool = False
     ) -> Optional[np.ndarray]:
-        """80%領域から元のマスク領域に拡張"""
+        """
+        80%領域から元のマスク領域に拡張
+        
+        Args:
+            original_mask: 元のマスク
+            sub_labels: サブ領域のラベル
+            target_label: ターゲットラベル
+            dist_transform: 距離変換
+            isDebug: デバッグモード
+            
+        Returns:
+            拡張されたマスク
+        """
         # 目標ラベルの領域を取得
         seed_region = (sub_labels == target_label).astype(np.uint8) * 255
         
@@ -181,34 +237,61 @@ class SalamiCircleDetectionService:
             expanded[valid_expansion] = 255
         
         # 領域が小さすぎる場合はNoneを返す
-        if np.sum(expanded > 0) < self.MIN_AREA_THRESHOLD:
+        area = np.sum(expanded > 0)
+        if area < self.MIN_AREA_THRESHOLD:
+            if isDebug:
+                print(f"[DEBUG] 領域が小さすぎるためスキップ (area={area}, threshold={self.MIN_AREA_THRESHOLD})")
             return None
+        
+        if isDebug:
+            print(f"[DEBUG] 領域拡張完了 (area={area})")
         
         return expanded
     
     def _create_circle_from_single_region(
         self, 
         mask: np.ndarray, 
-        dist_transform: np.ndarray
+        dist_transform: np.ndarray,
+        isDebug: bool = False
     ) -> Optional[Tuple[Tuple[int, int], int]]:
-        """単一領域から円を作成（距離変換の最大値を中心とする）"""
+        """
+        単一領域から円を作成（距離変換の最大値を中心とする）
+        
+        Args:
+            mask: バイナリマスク
+            dist_transform: 距離変換
+            isDebug: デバッグモード
+            
+        Returns:
+            円の情報（中心座標と半径）
+        """
         # 面積チェック
-        if np.sum(mask > 0) < self.MIN_AREA_THRESHOLD:
+        area = np.sum(mask > 0)
+        if area < self.MIN_AREA_THRESHOLD:
+            if isDebug:
+                print(f"[DEBUG] 領域が小さすぎるためスキップ (area={area})")
             return None
         
         # 距離変換の最大値位置を円の中心とする
         if dist_transform.max() == 0:
+            if isDebug:
+                print("[DEBUG] 距離変換が0のためスキップ")
             return None
         
         max_dist_idx = np.unravel_index(np.argmax(dist_transform), dist_transform.shape)
         center_y, center_x = max_dist_idx
         max_dist_value = dist_transform[max_dist_idx]
         
+        if isDebug:
+            print(f"[DEBUG] 中心位置: ({center_x}, {center_y}), 距離変換最大値: {max_dist_value:.2f}")
+        
         # 中心から外縁までの距離を計測して半径を決定
-        radius = self._calculate_radius_from_center(mask, center_x, center_y)
+        radius = self._calculate_radius_from_center(mask, center_x, center_y, isDebug)
         
         if radius is None:
             # フォールバック：距離変換の最大値を半径として使用
+            if isDebug:
+                print(f"[DEBUG] フォールバック：距離変換最大値を半径として使用")
             radius = max_dist_value
         
         # 画像サイズに対する最大半径チェック
@@ -216,7 +299,12 @@ class SalamiCircleDetectionService:
         max_radius = min(img_height, img_width) * self.MAX_RADIUS_RATIO
         
         if radius < self.MIN_RADIUS or radius > max_radius:
+            if isDebug:
+                print(f"[DEBUG] 半径が範囲外 (radius={radius:.2f}, min={self.MIN_RADIUS}, max={max_radius:.2f})")
             return None
+        
+        if isDebug:
+            print(f"[DEBUG] 円を検出: 中心=({center_x}, {center_y}), 半径={radius:.2f}")
         
         return ((int(center_x), int(center_y)), int(radius))
     
@@ -224,9 +312,21 @@ class SalamiCircleDetectionService:
         self, 
         mask: np.ndarray, 
         center_x: int, 
-        center_y: int
+        center_y: int,
+        isDebug: bool = False
     ) -> Optional[float]:
-        """中心点から外縁までの距離を計測して半径を計算"""
+        """
+        中心点から外縁までの距離を計測して半径を計算
+        
+        Args:
+            mask: バイナリマスク
+            center_x: 中心X座標
+            center_y: 中心Y座標
+            isDebug: デバッグモード
+            
+        Returns:
+            計算された半径
+        """
         # 輪郭を検出
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
@@ -250,13 +350,17 @@ class SalamiCircleDetectionService:
         # または最大距離を使用することも可能
         radius = np.mean(distances)
         
+        if isDebug:
+            print(f"[DEBUG] 輪郭までの距離: 平均={radius:.2f}, 最小={np.min(distances):.2f}, 最大={np.max(distances):.2f}")
+        
         return radius
     
     def detect_salami_circles(
         self, 
         image_path: str, 
         debug_output_dir: Optional[Path] = None, 
-        base_name: str = ""
+        base_name: str = "",
+        isDebug: bool = False
     ) -> List[Tuple[Tuple[int, int], int]]:
         """
         画像からサラミの円形領域を検出（ピザとサラミのセグメンテーションを組み合わせ）
@@ -265,37 +369,44 @@ class SalamiCircleDetectionService:
             image_path: 入力画像のパス
             debug_output_dir: デバッグ画像を保存するディレクトリ
             base_name: デバッグ画像のベース名
+            isDebug: デバッグモード（Trueの場合、途中経過を保存）
             
         Returns:
             各要素が((中心X座標, 中心Y座標), 半径)のタプルのリスト
         """
+        if isDebug:
+            print(f"[DEBUG] サラミ円検出を開始: {image_path}")
         # サラミマスクを取得
-        salami_mask = self._get_salami_mask(image_path)
+        salami_mask = self._get_salami_mask(image_path, isDebug)
         
-        if debug_output_dir and base_name:
+        if debug_output_dir and base_name and isDebug:
             self._save_debug_image(salami_mask, debug_output_dir, base_name, "サラミマスク")
         
         # ピザマスクを取得
-        pizza_mask = self.pizza_service.segment_pizza(image_path)
+        pizza_mask = self.pizza_service.segment_pizza(image_path, isDebug=False)
         
-        if debug_output_dir and base_name:
+        if debug_output_dir and base_name and isDebug:
             self._save_debug_image(pizza_mask, debug_output_dir, base_name, "ピザマスク")
         
         # マスクを結合（ピザ領域内のサラミのみを抽出）
         final_mask = cv2.bitwise_and(salami_mask, pizza_mask)
         
-        if debug_output_dir and base_name:
+        if isDebug:
+            print(f"[DEBUG] 結合マスクのピクセル数: {np.sum(final_mask == 255)}")
+        
+        if debug_output_dir and base_name and isDebug:
             self._save_debug_image(final_mask, debug_output_dir, base_name, "結合マスク")
         
         # マスクから円を検出
-        circles = self.detect_circles_from_mask(final_mask, debug_output_dir, base_name)
+        circles = self.detect_circles_from_mask(final_mask, debug_output_dir, base_name, isDebug)
         
         return circles
     
     def draw_circles_on_image(
         self, 
         image: np.ndarray, 
-        circles: List[Tuple[Tuple[int, int], int]]
+        circles: List[Tuple[Tuple[int, int], int]],
+        isDebug: bool = False
     ) -> np.ndarray:
         """
         検出した円を画像上に描画
@@ -303,10 +414,13 @@ class SalamiCircleDetectionService:
         Args:
             image: 入力画像
             circles: 描画する円のリスト
+            isDebug: デバッグモード
             
         Returns:
             円が描画された画像
         """
+        if isDebug:
+            print(f"[DEBUG] {len(circles)}個の円を描画")
         result = image.copy()
         
         for (center_x, center_y), radius in circles:
@@ -464,9 +578,21 @@ class SalamiCircleDetectionService:
         
         return ((int(x), int(y)), int(final_radius))
     
-    def _get_salami_mask(self, image_path: str) -> np.ndarray:
-        """サラミのセグメンテーション結果を取得"""
-        salami_result = self.salami_service.segment_salami(image_path)
+    def _get_salami_mask(self, image_path: str, isDebug: bool = False) -> np.ndarray:
+        """
+        サラミのセグメンテーション結果を取得
+        
+        Args:
+            image_path: 入力画像のパス
+            isDebug: デバッグモード
+            
+        Returns:
+            サラミマスク
+        """
+        if isDebug:
+            print("[DEBUG] サラミマスクを取得中...")
+        
+        salami_result = self.salami_service.segment_salami(image_path, isDebug=False)
         
         # 戻り値の型に応じて処理
         if isinstance(salami_result, tuple):
@@ -538,8 +664,13 @@ class SalamiCircleDetectionService:
         self._save_debug_image(visualization, output_dir, base_name, "領域分割")
 
 
-def process_images() -> None:
-    """メイン処理：リソースディレクトリ内のすべての画像を処理"""
+def process_images(isDebug: bool = True) -> None:
+    """
+    メイン処理：リソースディレクトリ内のすべての画像を処理
+    
+    Args:
+        isDebug: デバッグモード（デフォルトTrue）
+    """
     # サービスのインスタンスを作成
     service = SalamiCircleDetectionService()
     
@@ -555,17 +686,20 @@ def process_images() -> None:
         print("リソースディレクトリに画像ファイルが見つかりません")
         return
     
-    print(f"{len(image_files)}個の画像を処理します")
+    print(f"\n{len(image_files)}個の画像を処理します")
+    if isDebug:
+        print("デバッグモードで実行します...\n")
     
     for image_path in image_files:
         print(f"\n{image_path.name}を処理中...")
         
         try:
-            process_single_image(service, image_path, output_dir)
+            process_single_image(service, image_path, output_dir, isDebug)
         except Exception as e:
             print(f"  {image_path.name}の処理中にエラーが発生しました: {e}")
-            import traceback
-            traceback.print_exc()
+            if isDebug:
+                import traceback
+                traceback.print_exc()
             continue
     
     print(f"\n処理が完了しました。結果はdebug/salami_circle/に保存されています。")
@@ -574,15 +708,24 @@ def process_images() -> None:
 def process_single_image(
     service: SalamiCircleDetectionService, 
     image_path: Path, 
-    output_dir: Path
+    output_dir: Path,
+    isDebug: bool = True
 ) -> None:
-    """単一の画像を処理"""
+    """
+    単一の画像を処理
+    
+    Args:
+        service: サラミ円検出サービス
+        image_path: 入力画像のパス
+        output_dir: 出力ディレクトリ
+        isDebug: デバッグモード
+    """
     base_name = image_path.stem
     
     # ステップ1: 画像の前処理
     temp_preprocessed_path = output_dir / f"temp_preprocessed_{base_name}.jpg"
     preprocessed_image, info = service.preprocess_service.preprocess_pizza_image(
-        str(image_path), str(temp_preprocessed_path)
+        str(image_path), str(temp_preprocessed_path), isDebug
     )
     
     if info['is_transformed']:
@@ -593,13 +736,13 @@ def process_single_image(
         processed_image_path = str(image_path)
     
     # ステップ2: サラミの円を検出
-    circles = service.detect_salami_circles(processed_image_path, output_dir, base_name)
+    circles = service.detect_salami_circles(processed_image_path, output_dir, base_name, isDebug)
     
     # ステップ3: 表示用の画像を準備
     display_image = preprocessed_image if info['is_transformed'] else cv2.imread(str(image_path))
     
     # ステップ4: 結果を保存
-    save_results(service, display_image, circles, output_dir, base_name)
+    save_results(service, display_image, circles, output_dir, base_name, isDebug)
     
     # 一時ファイルをクリーンアップ
     if temp_preprocessed_path.exists():
@@ -614,17 +757,34 @@ def save_results(
     display_image: np.ndarray,
     circles: List[Tuple[Tuple[int, int], int]],
     output_dir: Path,
-    base_name: str
+    base_name: str,
+    isDebug: bool = False
 ) -> None:
-    """処理結果を保存"""
+    """
+    処理結果を保存
+    
+    Args:
+        service: サラミ円検出サービス
+        display_image: 表示用画像
+        circles: 検出された円のリスト
+        output_dir: 出力ディレクトリ
+        base_name: ファイル名のベース
+        isDebug: デバッグモード
+    """
     # 前処理済み画像を保存
     preprocessed_save_path = output_dir / f"{base_name}_preprocessed.jpg"
     cv2.imwrite(str(preprocessed_save_path), display_image)
     
+    if isDebug:
+        print(f"[DEBUG] 前処理済み画像を保存: {preprocessed_save_path}")
+    
     # 円検出結果を保存
-    circle_image = service.draw_circles_on_image(display_image, circles)
+    circle_image = service.draw_circles_on_image(display_image, circles, isDebug)
     circle_result_path = output_dir / f"{base_name}_circles.jpg"
     cv2.imwrite(str(circle_result_path), circle_image)
+    
+    if isDebug:
+        print(f"[DEBUG] 円検出結果を保存: {circle_result_path}")
 
 
 def print_detection_results(
