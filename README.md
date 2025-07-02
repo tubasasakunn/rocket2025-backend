@@ -117,7 +117,7 @@ pizza-sharing-api/
 
 ## 技術スタック
 
-- Python 3.12
+- Python 3.13
 - uv (パッケージ管理)
 - FastAPI
 - OpenCV (画像処理)

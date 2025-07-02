@@ -3,9 +3,9 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
-from service.paypay.client import PayPayClient
-from service.paypay.repository import PayPayRepository, Participant, SplitBill, PaymentRequest
-from service.paypay.split_payment_service import SplitPaymentService
+from src.service.paypay.client import PayPayClient
+from src.service.paypay.repository import PayPayRepository, Participant, SplitBill, PaymentRequest
+from src.service.paypay.split_payment_service import SplitPaymentService
 
 
 # テスト用のモックデータ
