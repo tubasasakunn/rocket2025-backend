@@ -3,6 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
 import sys
+from dotenv import load_dotenv
+
+# 環境変数の読み込み
+load_dotenv()
 
 # 正しいインポートパスを設定
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -12,10 +16,12 @@ if current_dir not in sys.path:
 try:
     from src.api.paypay_router import router as paypay_router
     from src.api.pizza_cutter_router import router as pizza_cutter_router
+    from src.api.user_record_router import router as user_record_router
 except ImportError:
     # ローカル環境での相対インポート
     from api.paypay_router import router as paypay_router
     from api.pizza_cutter_router import router as pizza_cutter_router
+    from api.user_record_router import router as user_record_router
 
 
 # FastAPI アプリケーションの作成
@@ -37,6 +43,7 @@ app.add_middleware(
 # ルーターの登録
 app.include_router(paypay_router, prefix="/api")
 app.include_router(pizza_cutter_router, prefix="/api")
+app.include_router(user_record_router, prefix="/api")
 
 
 # ルートエンドポイント
