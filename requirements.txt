@@ -10,3 +10,4 @@ pytest-asyncio==0.21.1
 ultralytics==8.0.223
 opencv-python-headless==4.8.1.78
 numpy>=1.22.0
+runpod==1.4.0
