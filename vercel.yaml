@@ -1,0 +1,6 @@
+framework: fastapi
+buildCommand: pip install -r requirements.txt
+installCommand: pip install -r requirements.txt
+buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+outputDirectory: .
+devCommand: uvicorn src.main:app --host 0.0.0.0 --port 3000 --reload
