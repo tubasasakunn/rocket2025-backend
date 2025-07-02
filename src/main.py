@@ -14,13 +14,11 @@ if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 try:
-    from src.api.paypay_router import router as paypay_router
     from src.api.pizza_cutter_router import router as pizza_cutter_router
     from src.api.calculate_ideal_cut import router as calculate_ideal_cut_router
     from src.api.user_record_router import router as user_record_router
 except ImportError:
     # ローカル環境での相対インポート
-    from api.paypay_router import router as paypay_router
     from api.pizza_cutter_router import router as pizza_cutter_router
     from api.calculate_ideal_cut import router as calculate_ideal_cut_router
     from api.user_record_router import router as user_record_router
@@ -29,7 +27,7 @@ except ImportError:
 # FastAPI アプリケーションの作成
 app = FastAPI(
     title="ピザ割り勘アプリ API",
-    description="ピザの具を平等に切り分け、PayPayで割り勘できるAPIサーバー",
+    description="ピザの具を平等に切り分けるアプリのAPIサーバー",
     version="1.0.0"
 )
 
@@ -43,7 +41,6 @@ app.add_middleware(
 )
 
 # ルーターの登録
-app.include_router(paypay_router, prefix="/api")
 app.include_router(pizza_cutter_router, prefix="/api")
 app.include_router(calculate_ideal_cut_router, prefix="/api")
 app.include_router(user_record_router, prefix="/api")
