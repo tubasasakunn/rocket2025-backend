@@ -3,8 +3,9 @@ import numpy as np
 from pathlib import Path
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from service.pizza_segmentation_service import PizzaSegmentationService
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from pizza_segmentation_service import PizzaSegmentationService
 
 
 class SalamiSegmentationService:
