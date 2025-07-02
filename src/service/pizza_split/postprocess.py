@@ -347,6 +347,87 @@ class PostprocessService:
         
         return svg_content
     
+    def create_piece_svg_content_on_original(self, original_image_path: str,
+                                           piece_boundaries: List[Tuple[float, float]],
+                                           salami_circles_normalized: List[Tuple[Tuple[float, float], float]],
+                                           pizza_center_normalized: Tuple[float, float],
+                                           pizza_radius_normalized: float,
+                                           preprocess_info: Dict,
+                                           piece_index: int) -> str:
+        """
+        個別ピースのSVGコンテンツを元の画像座標系で作成
+        
+        Args:
+            original_image_path: 元の画像パス
+            piece_boundaries: ピースの境界点（正規化座標）
+            salami_circles_normalized: 正規化されたサラミ円情報
+            pizza_center_normalized: 正規化されたピザ中心
+            pizza_radius_normalized: 正規化されたピザ半径
+            preprocess_info: 前処理情報
+            piece_index: ピースのインデックス
+            
+        Returns:
+            生成されたSVGコンテンツ（XML文字列）
+        """
+        # 元の画像サイズを取得
+        img = cv2.imread(original_image_path)
+        height, width = img.shape[:2]
+        
+        # ピースの境界点を逆変換
+        piece_boundaries_original = []
+        for px, py in piece_boundaries:
+            # 正規化座標から元の画像座標に変換
+            point_normalized = (
+                pizza_center_normalized[0] + px * pizza_radius_normalized,
+                pizza_center_normalized[1] + py * pizza_radius_normalized
+            )
+            if preprocess_info['is_transformed']:
+                point_original = self.inverse_transform_point(point_normalized, preprocess_info)
+            else:
+                point_original = point_normalized
+            piece_boundaries_original.append(point_original)
+        
+        # サラミを逆変換（このピースに含まれるもののみ）
+        salami_circles_original = []
+        for (cx, cy), r in salami_circles_normalized:
+            center_original, radius_original = self.inverse_transform_circle(
+                (cx, cy), r, preprocess_info
+            )
+            salami_circles_original.append((center_original, radius_original))
+        
+        # SVGを文字列として構築
+        svg_lines = []
+        svg_lines.append(f'<?xml version="1.0" encoding="utf-8" ?>')
+        svg_lines.append(f'<svg baseProfile="full" height="{height}" version="1.1" width="{width}" xmlns="http://www.w3.org/2000/svg" xmlns:ev="http://www.w3.org/2001/xml-events" xmlns:xlink="http://www.w3.org/1999/xlink">')
+        svg_lines.append(f'<defs>')
+        svg_lines.append(f'<clipPath id="piece_clip_{piece_index}">')
+        
+        # クリッピングパスとして境界を定義
+        points_str = ' '.join([f'{x},{y}' for x, y in piece_boundaries_original])
+        svg_lines.append(f'<polygon points="{points_str}" />')
+        svg_lines.append(f'</clipPath>')
+        svg_lines.append(f'</defs>')
+        
+        # 背景画像を埋め込み（クリッピングを適用）
+        svg_lines.append(f'<g clip-path="url(#piece_clip_{piece_index})">')
+        svg_lines.append(f'<image height="{height}" width="{width}" x="0" y="0" xlink:href="{original_image_path}" />')
+        
+        # サラミを描画（クリッピング内）
+        for (cx, cy), r in salami_circles_original:
+            svg_lines.append(f'<circle cx="{cx}" cy="{cy}" fill="indianred" fill-opacity="0.7" r="{r}" stroke="darkred" stroke-width="2" />')
+        
+        svg_lines.append(f'</g>')
+        
+        # ピースの境界線を描画
+        svg_lines.append(f'<polygon points="{points_str}" fill="none" stroke="brown" stroke-width="3" />')
+        
+        svg_lines.append('</svg>')
+        
+        # SVGコンテンツを結合
+        svg_content = '\n'.join(svg_lines)
+        
+        return svg_content
+    
     def create_overlay_image_on_original(self, original_image_path: str,
                                        pizza_center_normalized: Tuple[float, float],
                                        pizza_radius_normalized: float,

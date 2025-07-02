@@ -144,6 +144,7 @@ class PizzaProcessor:
         # 目標値計算と分割実行
         divider.calculate_targets()
         divider.divide_pizza()
+        divider.calculate_piece_boundaries()
         
         # quietモードでは結果出力をスキップ
         if quiet:
@@ -233,6 +234,19 @@ class PizzaProcessor:
             divider.py
         )
         
+        # 10. 各ピースのSVGを生成
+        if not quiet:
+            print("\n10. 各ピースのSVG生成...")
+        piece_svg_dir = self.output_dir / f"pieces_{self.timestamp}"
+        
+        # dividerに各ピースのSVGを生成させる
+        piece_svg_paths = divider.generate_piece_svgs_isolated(str(piece_svg_dir))
+        
+        if not quiet:
+            print(f"   各ピースのSVGを生成: {piece_svg_dir}")
+            for i, svg_path in enumerate(piece_svg_paths):
+                print(f"     - Piece {i+1}: {Path(svg_path).name}")
+        
         if not quiet:
             print(f"\n=== 処理完了 ===")
             print(f"前処理画像: {preprocessed_path}")
@@ -240,6 +254,7 @@ class PizzaProcessor:
             print(f"元画像用SVG: {svg_original_path}")
             print(f"元画像にオーバーレイしたPNG: {result_original_path}")
             print(f"結果画像: {result_path}")
+            print(f"各ピースのSVG: {piece_svg_dir}")
         
         return {
             'preprocessed_image': str(preprocessed_path),
@@ -252,6 +267,8 @@ class PizzaProcessor:
             'salami_circles': salami_circles,
             'cut_edges': divider.cut_edges,
             'pieces': divider.pieces,
+            'piece_svgs': piece_svg_paths,
+            'piece_svg_dir': str(piece_svg_dir),
             'preprocess_info': preprocess_info
         }
     
