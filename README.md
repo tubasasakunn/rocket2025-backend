@@ -145,5 +145,3 @@ python src/test/batch_process.py
 4. **サラミ円検出**: 個々のサラミを円として検出
 
 処理結果は `result/(処理名)/` ディレクトリに保存されます。
-
-// test
