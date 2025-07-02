@@ -15,6 +15,15 @@ class UserRecordResponse(BaseModel):
     update_at: str
 
 
+class UserRankingResponse(BaseModel):
+    """ユーザーランキングのレスポンス"""
+    id: int
+    account: str
+    score: int
+    rank: int
+    update_at: str
+
+
 class CreateUserRequest(BaseModel):
     """ユーザー作成リクエスト"""
     account: str = Field(..., description="ユーザーのアカウント名")
@@ -65,26 +74,83 @@ async def health_check(
         raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
 
 
-@router.get("/{user_id}", response_model=UserRecordResponse)
-async def get_user_by_id(
-    user_id: int,
+@router.get("/ranking", response_model=List[UserRankingResponse])
+async def get_ranking(
+    limit: int = Query(10, ge=1, le=1000, description="取得するランキングの最大件数"),
     service: UserRecordService = Depends(get_user_record_service)
 ):
     """
-    IDによるユーザー検索
+    ユーザーランキングを取得
     
-    指定されたIDのユーザーレコードを取得します。
+    スコアの高い順にユーザーランキングを返します。
+    同じスコアのユーザーは同じ順位になります。
     """
     try:
-        user = await service.get_user_by_id(user_id)
+        # Queryオブジェクトから整数値を取得
+        limit_value = 10
+        if isinstance(limit, int):
+            limit_value = limit
+        else:
+            # Queryオブジェクトの場合
+            limit_value = int(limit)
+            
+        # すべてのユーザーを取得
+        users = await service.get_all_users()
+        
+        # スコア降順でソート
+        users.sort(key=lambda user: user.score, reverse=True)
+        
+        # ランキング情報を付与
+        ranking_users = []
+        current_rank = 1
+        prev_score = None
+        
+        for i, user in enumerate(users):
+            # 前のユーザーと同じスコアでなければランクを進める
+            if prev_score is not None and user.score < prev_score:
+                current_rank = i + 1
+            
+            ranking_users.append(
+                UserRankingResponse(
+                    id=user.id,
+                    account=user.account,
+                    score=user.score,
+                    rank=current_rank,
+                    update_at=user.update_at
+                )
+            )
+            
+            prev_score = user.score
+            
+            # 指定された件数に達したら終了
+            if len(ranking_users) >= limit_value:
+                break
+        
+        return ranking_users
+    except GasClientException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get ranking: {str(e)}")
+
+
+@router.get("/by-account/{account}", response_model=UserRecordResponse)
+async def get_user_by_account(
+    account: str,
+    service: UserRecordService = Depends(get_user_record_service)
+):
+    """
+    アカウント名によるユーザー検索
+    
+    指定されたアカウント名のユーザーレコードを取得します。
+    """
+    try:
+        user = await service.get_user_by_account(account)
         if not user:
-            raise HTTPException(status_code=404, detail=f"User with ID {user_id} not found")
+            raise HTTPException(status_code=404, detail=f"User with account '{account}' not found")
         return user
     except GasClientException as e:
         raise HTTPException(status_code=500, detail=f"Failed to get user: {str(e)}")
 
 
-@router.get("/by-account/{account}", response_model=UserRecordResponse)
+@router.get("/{user_id}", response_model=UserRecordResponse)
 async def get_user_by_account(
     account: str,
     service: UserRecordService = Depends(get_user_record_service)
@@ -149,3 +215,57 @@ async def update_user_score(
         if "が見つかりません" in str(e) and not request.create_if_not_exist:
             raise HTTPException(status_code=404, detail=f"User with identifier '{identifier}' not found")
         raise HTTPException(status_code=500, detail=f"Failed to update score: {str(e)}")
+async def get_ranking(
+    limit: int = Query(10, ge=1, le=1000, description="取得するランキングの最大件数"),
+    service: UserRecordService = Depends(get_user_record_service)
+):
+    """
+    ユーザーランキングを取得
+    
+    スコアの高い順にユーザーランキングを返します。
+    同じスコアのユーザーは同じ順位になります。
+    """
+    try:
+        # Queryオブジェクトから整数値を取得
+        limit_value = 10
+        if isinstance(limit, int):
+            limit_value = limit
+        else:
+            # Queryオブジェクトの場合
+            limit_value = int(limit)
+            
+        # すべてのユーザーを取得
+        users = await service.get_all_users()
+        
+        # スコア降順でソート
+        users.sort(key=lambda user: user.score, reverse=True)
+        
+        # ランキング情報を付与
+        ranking_users = []
+        current_rank = 1
+        prev_score = None
+        
+        for i, user in enumerate(users):
+            # 前のユーザーと同じスコアでなければランクを進める
+            if prev_score is not None and user.score < prev_score:
+                current_rank = i + 1
+            
+            ranking_users.append(
+                UserRankingResponse(
+                    id=user.id,
+                    account=user.account,
+                    score=user.score,
+                    rank=current_rank,
+                    update_at=user.update_at
+                )
+            )
+            
+            prev_score = user.score
+            
+            # 指定された件数に達したら終了
+            if len(ranking_users) >= limit_value:
+                break
+        
+        return ranking_users
+    except GasClientException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get ranking: {str(e)}")
