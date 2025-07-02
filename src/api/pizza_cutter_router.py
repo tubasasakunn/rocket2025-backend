@@ -6,18 +6,31 @@ import os
 import uuid
 from pathlib import Path
 import shutil
+import numpy as np
 
 from service.pizza_split.pizza_segmentation_service import PizzaSegmentationService
 from service.pizza_split.pizza_circle_detection_service import PizzaCircleDetectionService
 from service.pizza_split.salami_segmentation_service import SalamiSegmentationService
 from service.pizza_split.salami_circle_detection_service import SalamiCircleDetectionService
 from service.pizza_split.preprocess import PreprocessService
+from service.pizza_split.process import PizzaProcessor
 
 
 # モデル定義
 class PizzaAnalysisResponse(BaseModel):
     """ピザ解析結果のレスポンス"""
     success: bool
+    pizza_circle: Optional[Dict[str, Any]] = None
+    salami_circles: List[Dict[str, Any]] = []
+    preprocessing_applied: bool = False
+    error_message: Optional[str] = None
+
+
+class PizzaDivisionResponse(BaseModel):
+    """ピザ分割結果のレスポンス"""
+    success: bool
+    overall_svg: Optional[str] = None
+    piece_svgs: List[str] = []
     pizza_circle: Optional[Dict[str, Any]] = None
     salami_circles: List[Dict[str, Any]] = []
     preprocessing_applied: bool = False
@@ -108,6 +121,145 @@ async def health_check():
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+
+
+@router.post("/divide", response_model=PizzaDivisionResponse)
+async def divide_pizza(
+    file: UploadFile = File(..., description="ピザの画像ファイル (JPG, PNG)"),
+    n_pieces: int = Form(4, description="分割するピース数（デフォルト: 4）")
+):
+    """
+    ピザ画像を指定されたピース数に分割
+    
+    アップロードされた画像に対して以下の処理を実行:
+    1. 前処理（楕円→円形変換）
+    2. ピザ領域の検出と円近似
+    3. サラミの検出と個別円検出
+    4. 移動ナイフ法による分割
+    5. 全体SVGと各ピースのSVGを生成
+    """
+    
+    # ファイル形式チェック
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="画像ファイルをアップロードしてください")
+    
+    # 一意のファイル名生成
+    file_id = str(uuid.uuid4())
+    file_extension = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
+    upload_path = UPLOAD_DIR / f"{file_id}{file_extension}"
+    
+    try:
+        # ファイル保存
+        with open(upload_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # PizzaProcessorを使用して処理
+        processor = PizzaProcessor(output_dir=str(UPLOAD_DIR / "process" / file_id))
+        result = processor.process_image(
+            str(upload_path),
+            n_pieces=n_pieces,
+            debug=False,
+            return_svg_only=True,
+            quiet=True
+        )
+        
+        # 各ピースのSVGコンテンツを生成
+        piece_svg_contents = []
+        if 'cut_edges' in result and 'pieces' in result:
+            # dividerの機能を再現するため、必要な情報を設定
+            from service.pizza_split.salami_devide import PizzaDivider
+            from service.pizza_split.postprocess import PostprocessService
+            
+            # サラミ半径の平均値を計算
+            salami_radii = [r for _, r in result['salami_circles']]
+            avg_salami_radius = np.mean(salami_radii) / result['pizza_radius'] if salami_radii else 0.1
+            
+            # ダミーのdividerインスタンスを作成（実際の分割は既に完了しているため）
+            divider = PizzaDivider(
+                R_pizza=1.0,
+                R_salami=avg_salami_radius,
+                m=len(result['salami_circles']),
+                n=n_pieces,
+                N_Monte=50000,
+                seed=42,
+                isDebug=False
+            )
+            
+            # 既に計算された結果を設定
+            divider.pieces = result['pieces']
+            divider.cut_edges = result['cut_edges']
+            divider.n = n_pieces
+            
+            # 正規化されたサラミ位置を設定
+            normalized_salami = []
+            for (cx, cy), r in result['salami_circles']:
+                norm_x = (cx - result['pizza_center'][0]) / result['pizza_radius']
+                norm_y = (cy - result['pizza_center'][1]) / result['pizza_radius']
+                normalized_salami.append((norm_x, norm_y))
+            divider.centers = np.array(normalized_salami)
+            
+            # モンテカルロ点を生成（必要なため）
+            divider.generate_monte_carlo_points()
+            divider.px = result.get('px', divider.px) if 'px' in result else divider.px
+            divider.py = result.get('py', divider.py) if 'py' in result else divider.py
+            
+            # 各ピースの境界を取得
+            piece_boundaries = divider.get_piece_boundaries_for_postprocess()
+            
+            # PostprocessServiceを使用して各ピースのSVGを生成
+            postprocess_service = PostprocessService()
+            for i, boundaries in enumerate(piece_boundaries):
+                if boundaries:  # 境界が存在する場合のみ
+                    svg_content = postprocess_service.create_piece_svg_content_on_original(
+                        str(upload_path),
+                        boundaries,
+                        result['salami_circles'],
+                        result['pizza_center'],
+                        result['pizza_radius'],
+                        result['preprocess_info'],
+                        i
+                    )
+                    piece_svg_contents.append(svg_content)
+                else:
+                    # 境界が計算できない場合は空のSVGを追加
+                    piece_svg_contents.append('<svg></svg>')
+        
+        return PizzaDivisionResponse(
+            success=True,
+            overall_svg=result.get('svg_content', ''),
+            piece_svgs=piece_svg_contents,
+            pizza_circle={
+                "center": {"x": float(result['pizza_center'][0]), "y": float(result['pizza_center'][1])},
+                "radius": float(result['pizza_radius'])
+            },
+            salami_circles=[
+                {
+                    "id": i + 1,
+                    "center": {"x": float(center[0]), "y": float(center[1])},
+                    "radius": float(radius)
+                }
+                for i, (center, radius) in enumerate(result['salami_circles'])
+            ],
+            preprocessing_applied=result['preprocess_info'].get('is_transformed', False)
+        )
+    
+    except Exception as e:
+        return PizzaDivisionResponse(
+            success=False,
+            error_message=str(e)
+        )
+    
+    finally:
+        # アップロードファイルをクリーンアップ
+        try:
+            if upload_path.exists():
+                upload_path.unlink()
+            # process_dirもクリーンアップ
+            process_dir = UPLOAD_DIR / "process" / file_id
+            if process_dir.exists():
+                shutil.rmtree(process_dir)
+        except Exception:
+            pass
 
 
 @router.post("/analyze", response_model=PizzaAnalysisResponse)

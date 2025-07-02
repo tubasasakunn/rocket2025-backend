@@ -529,8 +529,157 @@ class PizzaDivider:
                                     fill='indianred', stroke='darkred', 
                                     stroke_width=1.5, opacity=0.9))
         dwg.save()
+    
+    def generate_piece_svgs_isolated_content(self, svg_size=400):
+        """
+        各ピースの個別SVGコンテンツを生成（ファイル保存なし）
+        
+        Args:
+            svg_size: SVGのサイズ（正方形）
+            
+        Returns:
+            SVGコンテンツ文字列のリスト
+        """
+        svg_contents = []
+        
+        for i in range(self.n):
+            svg_content = self._generate_single_piece_svg_isolated_content(
+                piece_index=i,
+                svg_size=svg_size
+            )
+            svg_contents.append(svg_content)
+            
+        return svg_contents
+    
+    def _generate_single_piece_svg_isolated_content(self, piece_index, svg_size=400):
+        """
+        単一ピースのSVGコンテンツを生成（そのピースのみを表示、ファイル保存なし）
+        
+        Args:
+            piece_index: ピースのインデックス
+            svg_size: SVGのサイズ
+            
+        Returns:
+            SVGコンテンツ文字列
+        """
+        # SVG作成（StringIOを使用）
+        import io
+        dwg = svgwrite.Drawing(size=(svg_size, svg_size))
+        
+        # 背景を設定
+        dwg.add(dwg.rect((0, 0), (svg_size, svg_size), fill='white'))
+        
+        # このピースのモンテカルロ点から境界を推定
+        idx = self.pieces[piece_index]
+        piece_points = [(self.px[j], self.py[j]) for j in idx]
+        
+        if len(piece_points) == 0:
+            return dwg.tostring()
+        
+        # ピースの重心と範囲を計算
+        cx = np.mean([p[0] for p in piece_points])
+        cy = np.mean([p[1] for p in piece_points])
+        max_dist = max(np.sqrt((p[0] - cx)**2 + (p[1] - cy)**2) for p in piece_points)
+        
+        # 座標変換（ピースを中心に配置）
+        scale = svg_size / (3 * max_dist) if max_dist > 0 else svg_size / 2.4
+        
+        def transform_point(x, y):
+            tx = (x - cx) * scale + svg_size / 2
+            ty = -(y - cy) * scale + svg_size / 2  # y軸を反転
+            return (tx, ty)
+        
+        # ピースの背景（凸包を近似的に表現）とクリッピングパスの作成
+        from scipy.spatial import ConvexHull
+        hull_points = []
+        
+        if len(piece_points) > 3:
+            try:
+                hull = ConvexHull(piece_points)
+                hull_points = [transform_point(piece_points[i][0], piece_points[i][1]) 
+                            for i in hull.vertices]
+                
+                # クリッピングパスを定義
+                clip_path = dwg.defs.add(dwg.clipPath(id=f'piece_clip_{piece_index}'))
+                clip_path.add(dwg.polygon(points=hull_points))
+                
+                # 凸包を描画（ピースの背景）
+                dwg.add(dwg.polygon(points=hull_points,
+                                fill='bisque', stroke='saddlebrown', stroke_width=2))
+            except:
+                # 凸包の計算に失敗した場合はスキップ
+                pass
+        
+        # サラミを描画するグループを作成（クリッピングを適用）
+        if hull_points:  # 凸包が計算できた場合のみ
+            salami_group = dwg.g(clip_path=f'url(#piece_clip_{piece_index})')
+            
+            # このピースに含まれるサラミを描画
+            for scx, scy in self.centers:
+                # サラミがこのピースに含まれるかチェック（モンテカルロ点ベース）
+                salami_points = 0
+                for j in idx:
+                    if (self.px[j] - scx)**2 + (self.py[j] - scy)**2 <= self.R_salami**2:
+                        salami_points += 1
+                
+                if salami_points > 10:  # 十分な点がサラミ内にある場合
+                    center = transform_point(scx, scy)
+                    radius = self.R_salami * scale
+                    salami_group.add(dwg.circle(center=center, r=radius,
+                                            fill='indianred', stroke='darkred', 
+                                            stroke_width=1.5, opacity=0.9))
+            
+            # グループをSVGに追加
+            dwg.add(salami_group)
+        else:
+            # 凸包が計算できない場合は通常通り描画（クリッピングなし）
+            for scx, scy in self.centers:
+                salami_points = 0
+                for j in idx:
+                    if (self.px[j] - scx)**2 + (self.py[j] - scy)**2 <= self.R_salami**2:
+                        salami_points += 1
+                
+                if salami_points > 10:
+                    center = transform_point(scx, scy)
+                    radius = self.R_salami * scale
+                    dwg.add(dwg.circle(center=center, r=radius,
+                                    fill='indianred', stroke='darkred', 
+                                    stroke_width=1.5, opacity=0.9))
+        
+        return dwg.tostring()
+    
+    def get_piece_boundaries_for_postprocess(self):
+        """
+        各ピースの境界点を後処理用に取得（正規化座標）
+        
+        Returns:
+            List[List[Tuple[float, float]]]: 各ピースの境界点のリスト
+        """
+        piece_boundaries_list = []
+        
+        for i in range(self.n):
+            # このピースのモンテカルロ点から境界を推定
+            idx = self.pieces[i]
+            piece_points = [(self.px[j], self.py[j]) for j in idx]
+            
+            if len(piece_points) < 3:
+                piece_boundaries_list.append([])
+                continue
+            
+            # 凸包を計算して境界点を取得
+            from scipy.spatial import ConvexHull
+            try:
+                hull = ConvexHull(piece_points)
+                boundary_points = [(piece_points[v][0], piece_points[v][1]) 
+                                 for v in hull.vertices]
+                piece_boundaries_list.append(boundary_points)
+            except:
+                # 凸包の計算に失敗した場合は空リスト
+                piece_boundaries_list.append([])
+        
+        return piece_boundaries_list
 
-        def run(self):
+    def run(self):
             """分割処理を実行"""
             self._log("ピザ分割処理を開始")
             
