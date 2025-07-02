@@ -1,7 +1,10 @@
 import cv2
 import numpy as np
 from typing import Tuple, Optional
-from service.pizza_segmentation_service import PizzaSegmentationService
+try:
+    from .pizza_segmentation_service import PizzaSegmentationService
+except ImportError:
+    from pizza_segmentation_service import PizzaSegmentationService
 
 
 class PizzaCircleDetectionService:
@@ -81,34 +84,69 @@ class PizzaCircleDetectionService:
 
 
 if __name__ == "__main__":
+    import os
+    import glob
+    
     # サービスのインスタンスを作成
     service = PizzaCircleDetectionService()
     
-    # 入力画像のパス
-    input_image_path = "resource/pizza.jpg"
-    output_image_path = "result/pizza_circle_overlay.jpg"
+    # resourceディレクトリ内のすべての画像を処理
+    resource_dir = "resource"
+    output_dir = "debug/preprocess"
     
-    try:
-        # 円を検出
-        circle_info = service.detect_circle_from_image(input_image_path)
-        
-        if circle_info is None:
-            print("No circle detected in the image")
-        else:
+    # 出力ディレクトリを作成
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 画像ファイルを取得
+    image_extensions = ["*.jpg", "*.jpeg", "*.png"]
+    image_files = []
+    for ext in image_extensions:
+        image_files.extend(glob.glob(os.path.join(resource_dir, ext)))
+    
+    if not image_files:
+        print(f"No image files found in {resource_dir}")
+    else:
+        print(f"Found {len(image_files)} image files:")
+        for img_file in image_files:
+            print(f"  {img_file}")
+    
+    # 各画像を処理
+    for input_image_path in image_files:
+        try:
+            # ファイル名を取得
+            filename = os.path.basename(input_image_path)
+            name, ext = os.path.splitext(filename)
+            output_image_path = os.path.join(output_dir, f"{name}_circle{ext}")
+            
+            print(f"\nProcessing: {input_image_path}")
+            
+            # 円を検出
+            circle_info = service.detect_circle_from_image(input_image_path)
+            
+            if circle_info is None:
+                print(f"  No circle detected in {filename}")
+                continue
+            
             center, radius = circle_info
-            print(f"Circle detected:")
-            print(f"  Center: {center}")
-            print(f"  Radius: {radius}")
+            print(f"  Circle detected:")
+            print(f"    Center: {center}")
+            print(f"    Radius: {radius}")
             
             # 元の画像を読み込む
             original_image = cv2.imread(input_image_path)
+            
+            if original_image is None:
+                print(f"  Error: Could not load image {input_image_path}")
+                continue
             
             # 円をオーバーレイ
             result_image = service.draw_circle_on_image(original_image, center, radius)
             
             # 結果を保存
             cv2.imwrite(output_image_path, result_image)
-            print(f"Result saved to: {output_image_path}")
+            print(f"  Result saved to: {output_image_path}")
             
-    except Exception as e:
-        print(f"Error: {e}")
+        except Exception as e:
+            print(f"  Error processing {input_image_path}: {e}")
+    
+    print("\nProcessing completed.")
