@@ -92,7 +92,7 @@ if __name__ == "__main__":
     
     # resourceディレクトリ内のすべての画像を処理
     resource_dir = "resource"
-    output_dir = "debug/preprocess"
+    output_dir = "debug/pizza_circle"
     
     # 出力ディレクトリを作成
     os.makedirs(output_dir, exist_ok=True)
@@ -116,12 +116,33 @@ if __name__ == "__main__":
             # ファイル名を取得
             filename = os.path.basename(input_image_path)
             name, ext = os.path.splitext(filename)
+            preprocessed_image_path = os.path.join(output_dir, f"{name}_preprocessed{ext}")
             output_image_path = os.path.join(output_dir, f"{name}_circle{ext}")
             
             print(f"\nProcessing: {input_image_path}")
             
-            # 円を検出
-            circle_info = service.detect_circle_from_image(input_image_path)
+            # 前処理を実行
+            print("  Preprocessing...")
+            preprocess_service = None
+            try:
+                from .preprocess import PreprocessService
+            except ImportError:
+                from preprocess import PreprocessService
+            
+            if preprocess_service is None:
+                preprocess_service = PreprocessService()
+            
+            preprocessed_image, preprocess_info = preprocess_service.preprocess_pizza_image(input_image_path, preprocessed_image_path)
+            
+            if preprocessed_image is None:
+                print(f"  Error: Preprocessing failed for {filename}")
+                continue
+            
+            print(f"  Preprocessing completed:")
+            print(f"    Info: {preprocess_info}")
+            
+            # 前処理された画像から円を検出
+            circle_info = service.detect_circle_from_image(preprocessed_image_path)
             
             if circle_info is None:
                 print(f"  No circle detected in {filename}")
@@ -132,15 +153,15 @@ if __name__ == "__main__":
             print(f"    Center: {center}")
             print(f"    Radius: {radius}")
             
-            # 元の画像を読み込む
-            original_image = cv2.imread(input_image_path)
+            # 前処理された画像を読み込む
+            processed_image = cv2.imread(preprocessed_image_path)
             
-            if original_image is None:
-                print(f"  Error: Could not load image {input_image_path}")
+            if processed_image is None:
+                print(f"  Error: Could not load preprocessed image {preprocessed_image_path}")
                 continue
             
             # 円をオーバーレイ
-            result_image = service.draw_circle_on_image(original_image, center, radius)
+            result_image = service.draw_circle_on_image(processed_image, center, radius)
             
             # 結果を保存
             cv2.imwrite(output_image_path, result_image)
