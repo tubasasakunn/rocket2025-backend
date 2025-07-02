@@ -1,8 +1,20 @@
 import cv2
 import numpy as np
-from ultralytics import YOLO
 from pathlib import Path
 import os
+
+# PyTorch 2.6+ の weights_only 問題を解決
+import torch
+_original_load = torch.load
+
+def patched_load(f, map_location=None, pickle_module=None, **kwargs):
+    """torch.load をパッチして weights_only=False を強制"""
+    kwargs['weights_only'] = False
+    return _original_load(f, map_location, pickle_module, **kwargs)
+
+torch.load = patched_load
+
+from ultralytics import YOLO
 
 
 class PizzaSegmentationService:
@@ -10,7 +22,20 @@ class PizzaSegmentationService:
     
     def __init__(self):
         """YOLOモデルを初期化"""
-        self.model = YOLO('yolov8n-seg.pt')
+        # モデルファイルのパスを解決
+        current_dir = Path(__file__).parent
+        model_path = current_dir / 'yolov8n-seg.pt'
+        
+        # モデルが存在しない場合は、プロジェクトルートを確認
+        if not model_path.exists():
+            project_root = Path(__file__).parent.parent.parent.parent
+            model_path = project_root / 'yolov8n-seg.pt'
+        
+        if not model_path.exists():
+            raise FileNotFoundError(f"YOLOモデルファイルが見つかりません: {model_path}")
+        
+        # YOLO モデルをロード
+        self.model = YOLO(str(model_path))
         self.pizza_class_id = 53  # YOLOにおけるピザのクラスID
     
     def segment_pizza(self, image_path: str, isDebug: bool = False) -> np.ndarray:
