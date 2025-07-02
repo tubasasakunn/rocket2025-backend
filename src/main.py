@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from api.paypay_router import router as paypay_router
+from api.pizza_cutter_router import router as pizza_cutter_router
 
 
 # FastAPI アプリケーションの作成
@@ -23,6 +24,7 @@ app.add_middleware(
 
 # ルーターの登録
 app.include_router(paypay_router, prefix="/api")
+app.include_router(pizza_cutter_router, prefix="/api")
 
 
 # ルートエンドポイント
