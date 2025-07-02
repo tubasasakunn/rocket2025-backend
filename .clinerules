@@ -1,6 +1,7 @@
 このrepoではピザをサラミなどの具単位で完全に平等に切り分けるwebアプリのバックエンドを開発しています。
-現在、resultには適当な加工後のデータなどの適当なoutputを全て入れています。
-src直下にwebアプリのバックエンドのコードが入っています。
-webアプリのバックエンドは、PythonのFastAPIを使用しており、データベースは現状ありません。
-src/service/pizza_splitはピザの具を平等に切り分けるためのロジックを実装します。
-src/service/paypayはPayPayのAPIを使用して、PayPayのAPIを使用して割り勘できる機能を実装します。
+apiにエンドポイントを書いています。
+
+webアプリのバックエンドは、PythonのFastAPIで開発しています。
+frontendが叩くAPIエンドポイントをapiに定義しています。
+DBはgoogle app scriptで作っています。コードはgasに書いています。
+serviceにはシステムに利用する機能が定義されています。paypayに関するプログラムは要件を間違えて作成したものなので、無視してください。
