@@ -240,7 +240,7 @@ class PizzaProcessor:
         piece_svg_dir = self.output_dir / f"pieces_{self.timestamp}"
         
         # dividerに各ピースのSVGを生成させる
-        piece_svg_paths = divider.generate_piece_svgs(str(piece_svg_dir))
+        piece_svg_paths = divider.generate_piece_svgs_isolated(str(piece_svg_dir))
         
         if not quiet:
             print(f"   各ピースのSVGを生成: {piece_svg_dir}")
