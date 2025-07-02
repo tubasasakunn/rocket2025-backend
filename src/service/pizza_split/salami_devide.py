@@ -435,7 +435,7 @@ class PizzaDivider:
             svg_paths.append(str(svg_path))
             
         return svg_paths
-    
+
     def _generate_single_piece_svg_isolated(self, piece_index, output_path, svg_size=400):
         """
         単一ピースのSVGを生成（そのピースのみを表示）
@@ -472,90 +472,87 @@ class PizzaDivider:
             ty = -(y - cy) * scale + svg_size / 2  # y軸を反転
             return (tx, ty)
         
-        # ピースの背景（凸包を近似的に表現）
+        # ピースの背景（凸包を近似的に表現）とクリッピングパスの作成
         from scipy.spatial import ConvexHull
+        hull_points = []
+        
         if len(piece_points) > 3:
             try:
                 hull = ConvexHull(piece_points)
                 hull_points = [transform_point(piece_points[i][0], piece_points[i][1]) 
-                             for i in hull.vertices]
+                            for i in hull.vertices]
                 
-                # 凸包を描画
-                points_str = ' '.join([f'{p[0]},{p[1]}' for p in hull_points])
+                # クリッピングパスを定義
+                clip_path = dwg.defs.add(dwg.clipPath(id=f'piece_clip_{piece_index}'))
+                clip_path.add(dwg.polygon(points=hull_points))
+                
+                # 凸包を描画（ピースの背景）
                 dwg.add(dwg.polygon(points=hull_points,
-                                   fill='bisque', stroke='saddlebrown', stroke_width=2))
+                                fill='bisque', stroke='saddlebrown', stroke_width=2))
             except:
                 # 凸包の計算に失敗した場合はスキップ
                 pass
         
-        # このピースに含まれるサラミを描画
-        for scx, scy in self.centers:
-            # サラミがこのピースに含まれるかチェック（モンテカルロ点ベース）
-            salami_points = 0
-            for j in idx:
-                if (self.px[j] - scx)**2 + (self.py[j] - scy)**2 <= self.R_salami**2:
-                    salami_points += 1
+        # サラミを描画するグループを作成（クリッピングを適用）
+        if hull_points:  # 凸包が計算できた場合のみ
+            salami_group = dwg.g(clip_path=f'url(#piece_clip_{piece_index})')
             
-            if salami_points > 10:  # 十分な点がサラミ内にある場合
-                center = transform_point(scx, scy)
-                radius = self.R_salami * scale
-                dwg.add(dwg.circle(center=center, r=radius,
-                                   fill='indianred', stroke='darkred', 
-                                   stroke_width=1.5, opacity=0.9))
-        
-        # ピース番号を表示
-        dwg.add(dwg.text(
-            f'Piece {piece_index + 1}',
-            insert=(10, 25),
-            font_size='18px',
-            font_family='Arial',
-            fill='saddlebrown',
-            font_weight='bold'
-        ))
-        
-        # ピース情報
-        area = len(idx) * self.w
-        salami_area = self.on_salami[idx].sum() * self.w
-        
-        info_text = [
-            f'Area: {area:.3f}',
-            f'Salami area: {salami_area:.3f}'
-        ]
-        
-        for i, text in enumerate(info_text):
-            dwg.add(dwg.text(
-                text,
-                insert=(10, 50 + i * 20),
-                font_size='14px',
-                font_family='Arial',
-                fill='black'
-            ))
-        
+            # このピースに含まれるサラミを描画
+            for scx, scy in self.centers:
+                # サラミがこのピースに含まれるかチェック（モンテカルロ点ベース）
+                salami_points = 0
+                for j in idx:
+                    if (self.px[j] - scx)**2 + (self.py[j] - scy)**2 <= self.R_salami**2:
+                        salami_points += 1
+                
+                if salami_points > 10:  # 十分な点がサラミ内にある場合
+                    center = transform_point(scx, scy)
+                    radius = self.R_salami * scale
+                    salami_group.add(dwg.circle(center=center, r=radius,
+                                            fill='indianred', stroke='darkred', 
+                                            stroke_width=1.5, opacity=0.9))
+            
+            # グループをSVGに追加
+            dwg.add(salami_group)
+        else:
+            # 凸包が計算できない場合は通常通り描画（クリッピングなし）
+            for scx, scy in self.centers:
+                salami_points = 0
+                for j in idx:
+                    if (self.px[j] - scx)**2 + (self.py[j] - scy)**2 <= self.R_salami**2:
+                        salami_points += 1
+                
+                if salami_points > 10:
+                    center = transform_point(scx, scy)
+                    radius = self.R_salami * scale
+                    dwg.add(dwg.circle(center=center, r=radius,
+                                    fill='indianred', stroke='darkred', 
+                                    stroke_width=1.5, opacity=0.9))
         dwg.save()
-    
-    def run(self):
-        """分割処理を実行"""
-        self._log("ピザ分割処理を開始")
-        
-        # 1. モンテカルロ点を生成
-        self.generate_monte_carlo_points()
-        
-        # 2. サラミを配置
-        self.place_salami_random()
-        
-        # 3. 目標値を計算
-        self.calculate_targets()
-        
-        # 4. 移動ナイフ法で分割
-        self.divide_pizza()
-        
-        # 5. 結果を出力
-        self.print_results()
-        
-        # 6. 可視化
-        self.visualize()
-        
-        self._log("処理完了")
+
+        def run(self):
+            """分割処理を実行"""
+            self._log("ピザ分割処理を開始")
+            
+            # 1. モンテカルロ点を生成
+            self.generate_monte_carlo_points()
+            
+            # 2. サラミを配置
+            self.place_salami_random()
+            
+            # 3. 目標値を計算
+            self.calculate_targets()
+            
+            # 4. 移動ナイフ法で分割
+            self.divide_pizza()
+            
+            # 5. 結果を出力
+            self.print_results()
+            
+            # 6. 可視化
+            self.visualize()
+            
+            self._log("処理完了")
 
 
 def main(isDebug=False):
