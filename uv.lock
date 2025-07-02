@@ -734,6 +734,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "numpy" },
     { name = "opencv-python" },
+    { name = "pydantic" },
     { name = "ultralytics" },
     { name = "uvicorn" },
 ]
@@ -743,6 +744,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.14" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "opencv-python", specifier = ">=4.8.0" },
+    { name = "pydantic", specifier = ">=2.11.7" },
     { name = "ultralytics", specifier = ">=8.0.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
 ]

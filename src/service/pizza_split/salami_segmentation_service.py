@@ -201,22 +201,26 @@ class SalamiSegmentationService:
         return mask
 
     def _separate_by_erosion(self, mask: np.ndarray) -> np.ndarray:
-        """侵食処理による分割"""
-        # 接続部分を切断するために侵食
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (32,32))
-        eroded = cv2.erode(mask, kernel, iterations=3)
+        # より小さいカーネルで段階的に処理
+        kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (16,16))
+        kernel_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (32,32))
         
-        # 各領域にラベルを付ける
+        # 段階的な侵食
+        eroded = cv2.erode(mask, kernel_small, iterations=2)
+        eroded = cv2.erode(eroded, kernel_large, iterations=1)
+        
+        # 各領域を処理
         num_labels, labels = cv2.connectedComponents(eroded)
-        
-        # 各領域を元のサイズに戻す
         result = np.zeros_like(mask)
+        
         for label in range(1, num_labels):
-            # 各領域のマスクを作成
             region_mask = (labels == label).astype(np.uint8) * 255
-            # 膨張して元のサイズに近づける
-            dilated = cv2.dilate(region_mask, kernel, iterations=3)
-            # 元のマスクと論理積を取る
+            
+            # 条件付き膨張（元のマスクに制限される）
+            dilated = cv2.dilate(region_mask, kernel_large, iterations=1)
+            dilated = cv2.dilate(dilated, kernel_small, iterations=2)
+            
+            # 元のマスクとの交差部分のみ取得
             dilated = cv2.bitwise_and(dilated, mask)
             result = cv2.bitwise_or(result, dilated)
         
