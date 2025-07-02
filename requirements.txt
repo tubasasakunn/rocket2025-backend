@@ -11,3 +11,4 @@ ultralytics==8.0.223
 opencv-python-headless==4.8.1.78
 numpy>=1.22.0
 runpod==1.4.0
+svgwrite==1.4.3
