@@ -23,7 +23,7 @@ opencv-python-headless==4.8.1.78
 torch==2.0.0
 
 # TensorFlow - specified separately to avoid dependency conflicts
-tensorflow==2.12.0
+tensorflow>=2.13.0
 
 # Drawing and Visualization
 svgwrite==1.4.3

@@ -592,7 +592,7 @@ class SalamiCircleDetectionService:
         if isDebug:
             print("[DEBUG] サラミマスクを取得中...")
         
-        salami_result = self.salami_service.segment_salami(image_path, isDebug=False)
+        salami_result = self.salami_service.segment_salami(image_path)
         
         # 戻り値の型に応じて処理
         if isinstance(salami_result, tuple):
