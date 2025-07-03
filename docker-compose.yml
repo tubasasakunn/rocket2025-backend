@@ -10,6 +10,14 @@ services:
     environment:
       - PORT=8000
       - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - DEBUG=true
+      # Configure proper encoding handling for binary data
+      - PYTHONIOENCODING=utf-8
+      # FastAPI debug configuration
+      - FASTAPI_DEBUG=true
+      # Increase logging level for uvicorn
+      - LOG_LEVEL=debug
       # Add your other environment variables here
       # - DATABASE_URL=...
       # - PAYPAY_API_KEY=...
