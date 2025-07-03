@@ -122,7 +122,7 @@ class FaceFindService:
         faces = self.face_cascade.detectMultiScale(
             gray,
             scaleFactor=1.1,
-            minNeighbors=8,  # 値を大きくして偽陽性を減らす
+            minNeighbors=4,  # 値を大きくして偽陽性を減らす
             minSize=(50, 50)  # 最小サイズを大きくして小さな誤検出を防ぐ
         )
         
