@@ -177,6 +177,91 @@ class PizzaProcessor:
             n_pieces
         )
         
+        # 7.5. ピザ爆発SVG生成（3種類）
+        if not quiet:
+            print("\n7.5. ピザ爆発SVG生成...")
+        
+        # 爆発前（アニメーションなし）
+        svg_before_path = self.output_dir / f"pizza_before_{self.timestamp}.svg"
+        divider.create_properly_divided_exploded_svg(
+            str(svg_before_path),
+            svg_size=600,
+            explode_factor=0.0  # 爆発なし
+        )
+        if not quiet:
+            print(f"   爆発前SVG生成: {svg_before_path.name}")
+        
+        # 爆発後（アニメーションなし）
+        svg_after_path = self.output_dir / f"pizza_after_{self.timestamp}.svg"
+        divider.create_properly_divided_exploded_svg(
+            str(svg_after_path),
+            svg_size=600,
+            explode_factor=0.33  # 半径の1/3移動
+        )
+        if not quiet:
+            print(f"   爆発後SVG生成: {svg_after_path.name}")
+        
+        # アニメーション付き爆発
+        svg_animated_path = self.output_dir / f"pizza_animated_{self.timestamp}.svg"
+        divider.create_animated_exploding_pizza_svg(
+            str(svg_animated_path),
+            svg_size=600,
+            explode_distance=0.33,
+            animation_duration=2.0
+        )
+        if not quiet:
+            print(f"   アニメーション付きSVG生成: {svg_animated_path.name}")
+        
+        # 7.6. 元画像用の爆発SVG生成（逆変換適用）
+        if not quiet:
+            print("\n7.6. 元画像用爆発SVG生成（逆変換適用）...")
+        
+        # 爆発前（元画像用）
+        svg_before_original_path = self.output_dir / f"pizza_before_original_{self.timestamp}.svg"
+        self.create_exploded_svg_on_original(
+            str(image_path),
+            divider,
+            preprocess_info,
+            str(svg_before_original_path),
+            pizza_center,
+            pizza_radius,
+            explode_factor=0.0,
+            animated=False
+        )
+        if not quiet:
+            print(f"   元画像用爆発前SVG: {svg_before_original_path.name}")
+        
+        # 爆発後（元画像用）
+        svg_after_original_path = self.output_dir / f"pizza_after_original_{self.timestamp}.svg"
+        self.create_exploded_svg_on_original(
+            str(image_path),
+            divider,
+            preprocess_info,
+            str(svg_after_original_path),
+            pizza_center,
+            pizza_radius,
+            explode_factor=0.33,
+            animated=False
+        )
+        if not quiet:
+            print(f"   元画像用爆発後SVG: {svg_after_original_path.name}")
+        
+        # アニメーション付き（元画像用）
+        svg_animated_original_path = self.output_dir / f"pizza_animated_original_{self.timestamp}.svg"
+        self.create_exploded_svg_on_original(
+            str(image_path),
+            divider,
+            preprocess_info,
+            str(svg_animated_original_path),
+            pizza_center,
+            pizza_radius,
+            explode_factor=0.33,
+            animated=True,
+            animation_duration=2.0
+        )
+        if not quiet:
+            print(f"   元画像用アニメーション付きSVG: {svg_animated_original_path.name}")
+        
         # SVGのみ返すモードの場合は早期リターン
         if return_svg_only:
             # SVGコンテンツを直接生成
@@ -197,6 +282,12 @@ class PizzaProcessor:
             return {
                 'svg_original': str(svg_original_path),
                 'svg_content': svg_content,
+                'svg_before': str(svg_before_path),
+                'svg_after': str(svg_after_path),
+                'svg_animated': str(svg_animated_path),
+                'svg_before_original': str(svg_before_original_path),
+                'svg_after_original': str(svg_after_original_path),
+                'svg_animated_original': str(svg_animated_original_path),
                 'pizza_center': pizza_center,
                 'pizza_radius': pizza_radius,
                 'salami_circles': salami_circles,
@@ -260,6 +351,12 @@ class PizzaProcessor:
             'preprocessed_image': str(preprocessed_path),
             'svg_preprocessed': str(svg_preprocessed_path),
             'svg_original': str(svg_original_path),
+            'svg_before': str(svg_before_path),
+            'svg_after': str(svg_after_path),
+            'svg_animated': str(svg_animated_path),
+            'svg_before_original': str(svg_before_original_path),
+            'svg_after_original': str(svg_after_original_path),
+            'svg_animated_original': str(svg_animated_original_path),
             'result_image': str(result_path),
             'result_original_image': str(result_original_path),
             'pizza_center': pizza_center,
@@ -340,6 +437,239 @@ class PizzaProcessor:
         
         dwg.save()
         return svg_path
+    
+    def create_exploded_svg_on_original(self, image_path, divider, preprocess_info, 
+                                       output_path, pizza_center, pizza_radius,
+                                       explode_factor=0.33, animated=False,
+                                       animation_duration=2.0):
+        """
+        元画像用の爆発SVGを生成（逆変換適用）
+        
+        Args:
+            image_path: 元画像パス
+            divider: PizzaDividerインスタンス
+            preprocess_info: 前処理情報
+            output_path: 出力SVGパス
+            pizza_center: ピザ中心（前処理済み座標）
+            pizza_radius: ピザ半径（前処理済み）
+            explode_factor: 爆発係数（0.0=爆発なし、0.33=半径の1/3）
+            animated: アニメーションを含むか
+            animation_duration: アニメーション時間（秒）
+        """
+        from scipy.spatial import ConvexHull
+        
+        # 画像情報取得
+        img = cv2.imread(str(image_path))
+        height, width = img.shape[:2]
+        
+        # SVG作成
+        dwg = svgwrite.Drawing(str(output_path), size=(width, height))
+        
+        # 背景画像
+        dwg.add(dwg.image(
+            href=str(image_path),
+            insert=(0, 0),
+            size=(width, height)
+        ))
+        
+        # 各ピースの角度を計算
+        piece_angles = []
+        for i in range(divider.n):
+            idx = divider.pieces[i]
+            # ピースの重心を計算
+            cx = np.mean([divider.px[j] for j in idx])
+            cy = np.mean([divider.py[j] for j in idx])
+            angle = np.arctan2(cy, cx)
+            piece_angles.append(angle)
+        
+        # アニメーション用のスタイル
+        if animated:
+            style_rules = []
+            for i in range(divider.n):
+                angle = piece_angles[i]
+                # 正規化座標での移動量
+                norm_offset_x = divider.R_pizza * explode_factor * np.cos(angle)
+                norm_offset_y = divider.R_pizza * explode_factor * np.sin(angle)
+                
+                # 前処理済み画像座標での移動量
+                offset_x = norm_offset_x * pizza_radius
+                offset_y = norm_offset_y * pizza_radius
+                
+                # 逆変換を適用して元画像での移動量を計算
+                start_point = (pizza_center[0], pizza_center[1])
+                end_point = (pizza_center[0] + offset_x, pizza_center[1] + offset_y)
+                
+                # 逆変換
+                start_original = self.postprocess_service.inverse_transform_point(start_point, preprocess_info)
+                end_original = self.postprocess_service.inverse_transform_point(end_point, preprocess_info)
+                
+                # 元画像での移動量
+                final_offset_x = end_original[0] - start_original[0]
+                final_offset_y = end_original[1] - start_original[1]
+                
+                style_rules.append(f'''
+        @keyframes explode_piece_{i+1} {{
+            0% {{
+                transform: translate(0, 0);
+                opacity: 0.8;
+            }}
+            100% {{
+                transform: translate({final_offset_x}px, {final_offset_y}px);
+                opacity: 1;
+            }}
+        }}
+        
+        #animated_piece_{i+1} {{
+            animation: explode_piece_{i+1} {animation_duration}s ease-out forwards;
+            animation-delay: {i * 0.2}s;
+            transform-origin: center;
+        }}''')
+            
+            global_style = '\n'.join(style_rules) + '''
+        
+        /* ホバー時の効果 */
+        g[id^="animated_piece_"] {
+            transition: filter 0.3s ease;
+        }
+        
+        g[id^="animated_piece_"]:hover {
+            filter: brightness(1.2) drop-shadow(0 0 10px rgba(0,0,0,0.3));
+            cursor: pointer;
+        }
+        '''
+            
+            style_elem = dwg.style(global_style)
+            dwg.defs.add(style_elem)
+        
+        # カラーマップ
+        cmap = plt.get_cmap('tab10', divider.n)
+        
+        # 各ピースを描画
+        for i in range(divider.n):
+            idx = divider.pieces[i]
+            if len(idx) < 3:
+                continue
+            
+            # ピースグループ
+            piece_id = f"animated_piece_{i+1}" if animated else f"piece_{i+1}"
+            piece_group = dwg.g(id=piece_id)
+            
+            # 爆発オフセット（アニメーションなしの場合）
+            if not animated and explode_factor > 0:
+                angle = piece_angles[i]
+                norm_offset_x = divider.R_pizza * explode_factor * np.cos(angle)
+                norm_offset_y = divider.R_pizza * explode_factor * np.sin(angle)
+                
+                # 前処理済み画像座標での移動量
+                offset_x = norm_offset_x * pizza_radius
+                offset_y = norm_offset_y * pizza_radius
+                
+                # 逆変換を適用
+                start_point = (pizza_center[0], pizza_center[1])
+                end_point = (pizza_center[0] + offset_x, pizza_center[1] + offset_y)
+                
+                start_original = self.postprocess_service.inverse_transform_point(start_point, preprocess_info)
+                end_original = self.postprocess_service.inverse_transform_point(end_point, preprocess_info)
+                
+                final_offset_x = end_original[0] - start_original[0]
+                final_offset_y = end_original[1] - start_original[1]
+                
+                piece_group = dwg.g(id=piece_id, transform=f"translate({final_offset_x},{final_offset_y})")
+            
+            # ピースの境界を計算（正規化座標）
+            piece_points = [(divider.px[j], divider.py[j]) for j in idx]
+            hull = ConvexHull(piece_points)
+            hull_points_norm = [piece_points[i] for i in hull.vertices]
+            
+            # 正規化座標から前処理済み画像座標に変換
+            hull_points_preprocessed = []
+            for x_norm, y_norm in hull_points_norm:
+                x_pre = pizza_center[0] + x_norm * pizza_radius
+                y_pre = pizza_center[1] + y_norm * pizza_radius
+                hull_points_preprocessed.append((x_pre, y_pre))
+            
+            # 前処理済み座標から元画像座標に逆変換
+            hull_points_original = []
+            for point in hull_points_preprocessed:
+                original_point = self.postprocess_service.inverse_transform_point(point, preprocess_info)
+                hull_points_original.append(original_point)
+            
+            # ピースの色
+            color = cmap(i)
+            color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
+                                                      int(color[1]*255), 
+                                                      int(color[2]*255))
+            
+            # ピースポリゴン
+            piece_group.add(dwg.polygon(
+                points=hull_points_original,
+                fill=color_hex,
+                opacity=0.7,
+                stroke='darkgray',
+                stroke_width=2
+            ))
+            
+            # クリッピングパス（サラミ用）
+            clip_id = f'piece_clip_{i}'
+            clip_path = dwg.defs.add(dwg.clipPath(id=clip_id))
+            clip_path.add(dwg.polygon(points=hull_points_original))
+            
+            # サラミグループ
+            salami_group = dwg.g(clip_path=f'url(#{clip_id})')
+            
+            # このピースに含まれるサラミを描画
+            for cx_norm, cy_norm in divider.centers:
+                # サラミとピースの重なりを計算
+                overlap_points = 0
+                for j in idx:
+                    if (divider.px[j] - cx_norm)**2 + (divider.py[j] - cy_norm)**2 <= divider.R_salami**2:
+                        overlap_points += 1
+                
+                if overlap_points > 0:
+                    # サラミ中心を前処理済み座標に変換
+                    cx_pre = pizza_center[0] + cx_norm * pizza_radius
+                    cy_pre = pizza_center[1] + cy_norm * pizza_radius
+                    
+                    # 元画像座標に逆変換
+                    cx_original, cy_original = self.postprocess_service.inverse_transform_point(
+                        (cx_pre, cy_pre), preprocess_info
+                    )
+                    
+                    # サラミ半径も変換
+                    # 半径変換のためにサラミの端点を変換
+                    edge_point_pre = (cx_pre + divider.R_salami * pizza_radius, cy_pre)
+                    edge_point_original = self.postprocess_service.inverse_transform_point(
+                        edge_point_pre, preprocess_info
+                    )
+                    r_original = abs(edge_point_original[0] - cx_original)
+                    
+                    # 重なり面積に応じて透明度を調整
+                    total_salami_points = sum(1 for px, py in zip(divider.px, divider.py) 
+                                            if (px - cx_norm)**2 + (py - cy_norm)**2 <= divider.R_salami**2)
+                    overlap_ratio = overlap_points / max(total_salami_points, 1)
+                    
+                    if overlap_ratio > 0.8:
+                        opacity = 0.9
+                    else:
+                        opacity = 0.7
+                    
+                    salami_group.add(dwg.circle(
+                        center=(cx_original, cy_original),
+                        r=r_original,
+                        fill='indianred',
+                        stroke='darkred',
+                        stroke_width=1.5,
+                        opacity=opacity
+                    ))
+            
+            piece_group.add(salami_group)
+            
+            # ピース番号
+            
+            dwg.add(piece_group)
+        
+        
+        dwg.save()
     
     def create_result_image(self, image_path, pizza_center, pizza_radius,
                            salami_circles, cut_edges, pieces, px, py):
