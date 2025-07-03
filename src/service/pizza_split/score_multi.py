@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import json
 
-from score import PizzaScoreCalculator
+from src.service.pizza_split.score import PizzaScoreCalculator
 
 
 class MultiImageScoreCalculator:

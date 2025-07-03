@@ -23,11 +23,18 @@ COPY . .
 # Create uploads directory
 RUN mkdir -p uploads/process
 
+# Make entrypoint script executable
+RUN chmod +x /app/entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PORT=10000
 ENV RUNPOD_MODE=web
+ENV PYTHONPATH=/app
 
 # Expose the port for Render
 EXPOSE 10000
@@ -36,4 +43,4 @@ EXPOSE 10000
 RUN pip install gunicorn
 
 # Use Gunicorn with Uvicorn workers for better performance and stability
-CMD ["sh", "-c", "gunicorn src.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 4 --timeout 120"]
+CMD gunicorn src.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 4 --timeout 120
