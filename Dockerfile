@@ -1,41 +1,39 @@
-FROM python:3.11-slim
+FROM python:3.11.9-slim
 
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install dependencies
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install core dependencies first
-RUN pip install --no-cache-dir pip setuptools wheel --upgrade && \
-    pip install --no-cache-dir numpy==1.24.3 && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir svgwrite==1.4.3 matplotlib==3.7.1
-
-# Verify that svgwrite is installed
-RUN python -c "import svgwrite; print(f'svgwrite version: {svgwrite.__version__}')"
-
-# Copy the model file
+# Copy YOLOv8 model
 COPY yolov8n-seg.pt .
 
-# Copy the application code
-COPY src/ src/
-COPY api/ api/
-COPY runpod_handler.py .
+# Copy application code
+COPY . .
 
-# Make upload directory
-RUN mkdir -p uploads
+# Create uploads directory
+RUN mkdir -p uploads/process
 
 # Set environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=10000
+ENV RUNPOD_MODE=web
 
-# Debug: Print Python path and installed packages at startup
-RUN pip freeze > /app/installed_packages.txt
+# Expose the port for Render
+EXPOSE 10000
 
-# Default command
-CMD ["python", "runpod_handler.py"]
+# Run the application with Gunicorn + Uvicorn workers (recommended for production)
+RUN pip install gunicorn
+
+# Use Gunicorn with Uvicorn workers for better performance and stability
+CMD ["sh", "-c", "gunicorn src.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 4 --timeout 120"]
