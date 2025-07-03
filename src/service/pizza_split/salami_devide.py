@@ -1587,6 +1587,104 @@ class PizzaDivider:
         dwg.save()
         self._log(f"アニメーション付きピザ爆発SVG生成完了: {output_path}")
 
+    def generate_colored_piece_svgs(self, svg_size=400):
+        """
+        各ピースを色付きで個別のSVG文字列として生成
+        
+        Returns:
+            List[str]: 各ピースのSVG文字列のリスト
+        """
+        svg_contents = []
+        
+        # カラーマップを準備
+        cmap = plt.get_cmap('tab10', self.n)
+        
+        for i in range(self.n):
+            # SVGを作成
+            dwg = svgwrite.Drawing(size=(svg_size, svg_size))
+            dwg['viewBox'] = f'0 0 {svg_size} {svg_size}'
+            
+            # 背景
+            dwg.add(dwg.rect((0, 0), (svg_size, svg_size), fill='white'))
+            
+            # ピースの凸包を計算
+            idx = self.pieces[i]
+            piece_points = [(self.px[j], self.py[j]) for j in idx]
+            
+            if len(piece_points) >= 3:
+                try:
+                    hull = ConvexHull(piece_points)
+                    # 座標をSVG座標系に変換
+                    hull_points = []
+                    for j in hull.vertices:
+                        x, y = piece_points[j]
+                        tx = (x + 1.2) * svg_size / 2.4
+                        ty = (-y + 1.2) * svg_size / 2.4
+                        hull_points.append((tx, ty))
+                    
+                    # ピースの色
+                    color = cmap(i)
+                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
+                                                              int(color[1]*255), 
+                                                              int(color[2]*255))
+                    
+                    # クリッピングパスを定義
+                    clip_id = f'piece_clip_{i}'
+                    clip_path = dwg.defs.add(dwg.clipPath(id=clip_id))
+                    clip_path.add(dwg.polygon(points=hull_points))
+                    
+                    # ピースのポリゴンを描画
+                    dwg.add(dwg.polygon(points=hull_points,
+                                       fill=color_hex,
+                                       opacity=0.8,
+                                       stroke='darkgray',
+                                       stroke_width=2))
+                    
+                    # サラミグループ（クリッピング適用）
+                    salami_group = dwg.g(clip_path=f'url(#{clip_id})')
+                    
+                    # サラミを描画（このピースに含まれる部分のみ）
+                    for cx, cy in self.centers:
+                        # このピースに含まれるサラミをチェック
+                        overlap_points = 0
+                        for j in idx:
+                            if (self.px[j] - cx)**2 + (self.py[j] - cy)**2 <= self.R_salami**2:
+                                overlap_points += 1
+                        
+                        if overlap_points > 0:
+                            # サラミの座標をSVG座標系に変換
+                            sx = (cx + 1.2) * svg_size / 2.4
+                            sy = (-cy + 1.2) * svg_size / 2.4
+                            salami_radius = self.R_salami * svg_size / 2.4
+                            
+                            # 重なり面積を計算
+                            total_salami_points = sum(1 for px, py in zip(self.px, self.py) 
+                                                    if (px - cx)**2 + (py - cy)**2 <= self.R_salami**2)
+                            overlap_ratio = overlap_points / max(total_salami_points, 1)
+                            
+                            # 20%以上重なる場合のみ描画
+                            if overlap_ratio > 0.2:
+                                salami_opacity = 0.9 if overlap_ratio > 0.8 else 0.7
+                                salami_group.add(dwg.circle(center=(sx, sy), r=salami_radius,
+                                                          fill='indianred', 
+                                                          stroke='darkred', 
+                                                          stroke_width=1, 
+                                                          opacity=salami_opacity))
+                    
+                    # サラミグループをdwgに追加
+                    dwg.add(salami_group)
+                
+                except Exception as e:
+                    self._log(f"ピース{i+1}のSVG生成でエラー: {e}")
+                    # エラーの場合は空のSVGを追加
+                    svg_contents.append('<?xml version="1.0" encoding="utf-8" ?>\n<svg></svg>')
+                    continue
+            
+            # SVGを文字列として取得
+            svg_contents.append(dwg.tostring())
+        
+        return svg_contents
+
     def run(self):
             """分割処理を実行"""
             self._log("ピザ分割処理を開始")

@@ -32,6 +32,7 @@ class PizzaDivisionResponse(BaseModel):
     svg_before_explosion: Optional[str] = None  # 爆発前のSVG
     svg_after_explosion: Optional[str] = None   # 爆発後のSVG
     svg_animated: Optional[str] = None          # アニメーション付きSVG
+    piece_svgs: List[str] = []                  # 各ピースの個別SVG（色付き）
     error_message: Optional[str] = None
 
 
@@ -182,11 +183,53 @@ async def divide_pizza(
             if animated_path.exists():
                 svg_animated = animated_path.read_text()
         
+        # 各ピースの色付きSVGを生成
+        piece_svgs = []
+        if 'cut_edges' in result and 'pieces' in result:
+            from service.pizza_split.salami_devide import PizzaDivider
+            
+            # サラミ半径の平均値を計算
+            salami_radii = [r for _, r in result['salami_circles']]
+            avg_salami_radius = np.mean(salami_radii) / result['pizza_radius'] if salami_radii else 0.1
+            
+            # dividerインスタンスを作成
+            divider = PizzaDivider(
+                R_pizza=1.0,
+                R_salami=avg_salami_radius,
+                m=len(result['salami_circles']),
+                n=n_pieces,
+                N_Monte=50000,
+                seed=42,
+                isDebug=False
+            )
+            
+            # 既に計算された結果を設定
+            divider.pieces = result['pieces']
+            divider.cut_edges = result['cut_edges']
+            divider.n = n_pieces
+            
+            # 正規化されたサラミ位置を設定
+            normalized_salami = []
+            for (cx, cy), r in result['salami_circles']:
+                norm_x = (cx - result['pizza_center'][0]) / result['pizza_radius']
+                norm_y = (cy - result['pizza_center'][1]) / result['pizza_radius']
+                normalized_salami.append((norm_x, norm_y))
+            divider.centers = np.array(normalized_salami)
+            
+            # モンテカルロ点を生成（必要なため）
+            divider.generate_monte_carlo_points()
+            divider.px = result.get('px', divider.px) if 'px' in result else divider.px
+            divider.py = result.get('py', divider.py) if 'py' in result else divider.py
+            
+            # 色付きピースSVGを生成
+            piece_svgs = divider.generate_colored_piece_svgs(svg_size=400)
+        
         return PizzaDivisionResponse(
             success=True,
             svg_before_explosion=svg_before,
             svg_after_explosion=svg_after,
-            svg_animated=svg_animated
+            svg_animated=svg_animated,
+            piece_svgs=piece_svgs
         )
     
     except Exception as e:

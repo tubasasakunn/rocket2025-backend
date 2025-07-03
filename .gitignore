@@ -63,3 +63,5 @@ debug/*.png
 result/
 test_svg_output/
 animated_pizza_output/
+*.svg
+*.json
