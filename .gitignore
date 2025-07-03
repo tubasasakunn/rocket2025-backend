@@ -59,7 +59,7 @@ debug/*.jpg
 debug/*.png
 
 # Large model files
-*.pt
+
 result/
 test_svg_output/
 animated_pizza_output/
