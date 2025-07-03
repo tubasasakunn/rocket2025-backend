@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: rocket2025-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /pizza-cutter/health
+    envVars:
+      - key: PORT
+        value: 10000
+    buildCommand: echo "Docker build will be used"
