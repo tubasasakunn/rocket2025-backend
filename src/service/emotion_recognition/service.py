@@ -10,7 +10,19 @@ from fer import FER
 import cv2
 import numpy as np
 import io
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, List
+
+
+# 感情ごとの支払い意欲の重み付け
+EMOTION_PAY_WEIGHTS = {
+    "angry": 0.15,
+    "disgust": 0.15,
+    "fear": 0.20,
+    "sad": 0.20,
+    "surprise": 0.80,
+    "happy": 0.90,
+    "neutral": 0.05
+}
 
 
 class EmotionRecognitionService:
@@ -66,3 +78,25 @@ class EmotionRecognitionService:
             "dominant": dominant,
             "scores": scores
         }
+    
+    @staticmethod
+    def calc_pay_probability(scores: Optional[Dict[str, float]]) -> Optional[float]:
+        """
+        感情スコアから支払い確率の原値を計算
+        
+        Parameters:
+        - scores: 各感情のスコア（0-1の範囲、合計1）
+        
+        Returns:
+        - pay_raw: 支払い確率の原値（正規化前）
+          Noneの場合は感情認識に失敗したことを示す
+        """
+        if scores is None or not scores:
+            return None
+            
+        pay_raw = 0.0
+        for emotion, score in scores.items():
+            if emotion in EMOTION_PAY_WEIGHTS:
+                pay_raw += score * EMOTION_PAY_WEIGHTS[emotion]
+                
+        return pay_raw
