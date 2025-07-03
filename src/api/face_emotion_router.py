@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 # サービスのインポート
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from service.face_find.service import FaceFindService
-from service.emotion_recognition.service import EmotionRecognitionService
+from service.emotion_recognition.service import EmotionRecognitionService, EMOTION_PAY_WEIGHTS
 
 # ルーターの作成
 router = APIRouter(tags=["face-emotion"])
@@ -46,6 +46,7 @@ async def face_emotion(request: FaceFindRequest):
       - image: 顔の画像（Base64エンコード、200x200にリサイズ済み）
       - dominant: 最も強い感情
       - scores: 各感情のスコア
+      - pay: 支払い確率（0-1の範囲、全顔の合計が1になる）
     - file: "upload.jpg"（固定値）
     
     Example Response:
@@ -64,7 +65,8 @@ async def face_emotion(request: FaceFindRequest):
                     "sad": 0.03,
                     "surprise": 0.02,
                     "neutral": 0.02
-                }
+                },
+                "pay": 0.65
             },
             {
                 "image": "data:image/jpeg;base64,...",
@@ -77,7 +79,8 @@ async def face_emotion(request: FaceFindRequest):
                     "sad": 0.15,
                     "surprise": 0.05,
                     "neutral": 0.62
-                }
+                },
+                "pay": 0.35
             }
         ],
         "file": "upload.jpg"
@@ -90,6 +93,9 @@ async def face_emotion(request: FaceFindRequest):
         
         # 各顔に対して感情認識を実行
         results = []
+        pay_raws = []  # 支払い確率の原値を保存するリスト
+        missing_count = 0  # 感情認識に失敗した顔の数
+        
         for face_b64 in face_result["faces"]:
             # プレースホルダー画像かどうかを確認
             if face_b64.startswith("placeholder://"):
@@ -102,6 +108,8 @@ async def face_emotion(request: FaceFindRequest):
                     "dominant": None,
                     "scores": None
                 })
+                pay_raws.append(None)
+                missing_count += 1
             else:
                 # 通常の顔画像の場合
                 # Base64から画像バイナリに変換
@@ -116,12 +124,16 @@ async def face_emotion(request: FaceFindRequest):
                 try:
                     emotion_result = emotion_service.analyze(face_bytes)
                     
+                    # 支払い確率の原値を計算
+                    pay_raw = EmotionRecognitionService.calc_pay_probability(emotion_result["scores"])
+                    
                     # 結果を追加
                     results.append({
                         "image": face_b64,
                         "dominant": emotion_result["dominant"],
                         "scores": emotion_result["scores"]
                     })
+                    pay_raws.append(pay_raw)
                 except Exception as e:
                     # 感情認識に失敗した場合は null を設定
                     results.append({
@@ -129,6 +141,28 @@ async def face_emotion(request: FaceFindRequest):
                         "dominant": None,
                         "scores": {}
                     })
+                    pay_raws.append(None)
+                    missing_count += 1
+        
+        # 支払い確率を正規化
+        sum_raw = sum(raw for raw in pay_raws if raw is not None)
+        
+        # 各顔の支払い確率を計算
+        for i, pay_raw in enumerate(pay_raws):
+            if pay_raw is not None:
+                # 感情認識に成功した顔
+                if sum_raw > 0:
+                    results[i]["pay"] = pay_raw / (sum_raw + missing_count)
+                else:
+                    # すべての顔の支払い確率の原値が0の場合は均等に分配
+                    results[i]["pay"] = 1.0 / len(pay_raws)
+            else:
+                # 感情認識に失敗した顔
+                if sum_raw > 0:
+                    results[i]["pay"] = 1.0 / (sum_raw + missing_count)
+                else:
+                    # すべての顔の支払い確率の原値が0の場合は均等に分配
+                    results[i]["pay"] = 1.0 / len(pay_raws)
         
         # レスポンスを作成
         response = {
@@ -165,6 +199,7 @@ async def face_emotion_form(
       - image: 顔の画像（Base64エンコード、200x200にリサイズ済み）
       - dominant: 最も強い感情
       - scores: 各感情のスコア
+      - pay: 支払い確率（0-1の範囲、全顔の合計が1になる）
     - file: アップロードされたファイル名
     
     Example Response:
@@ -183,7 +218,8 @@ async def face_emotion_form(
                     "sad": 0.03,
                     "surprise": 0.02,
                     "neutral": 0.02
-                }
+                },
+                "pay": 0.65
             },
             {
                 "image": "data:image/jpeg;base64,...",
@@ -196,7 +232,8 @@ async def face_emotion_form(
                     "sad": 0.15,
                     "surprise": 0.05,
                     "neutral": 0.62
-                }
+                },
+                "pay": 0.35
             }
         ],
         "file": "face.jpg"
@@ -222,6 +259,9 @@ async def face_emotion_form(
         
         # 各顔に対して感情認識を実行
         results = []
+        pay_raws = []  # 支払い確率の原値を保存するリスト
+        missing_count = 0  # 感情認識に失敗した顔の数
+        
         for face_b64 in face_result["faces"]:
             # プレースホルダー画像かどうかを確認
             if face_b64.startswith("placeholder://"):
@@ -234,6 +274,8 @@ async def face_emotion_form(
                     "dominant": None,
                     "scores": None
                 })
+                pay_raws.append(None)
+                missing_count += 1
             else:
                 # 通常の顔画像の場合
                 # Base64から画像バイナリに変換
@@ -248,12 +290,16 @@ async def face_emotion_form(
                 try:
                     emotion_result = emotion_service.analyze(face_bytes)
                     
+                    # 支払い確率の原値を計算
+                    pay_raw = EmotionRecognitionService.calc_pay_probability(emotion_result["scores"])
+                    
                     # 結果を追加
                     results.append({
                         "image": face_b64,
                         "dominant": emotion_result["dominant"],
                         "scores": emotion_result["scores"]
                     })
+                    pay_raws.append(pay_raw)
                 except Exception as e:
                     # 感情認識に失敗した場合は null を設定
                     results.append({
@@ -261,6 +307,28 @@ async def face_emotion_form(
                         "dominant": None,
                         "scores": {}
                     })
+                    pay_raws.append(None)
+                    missing_count += 1
+        
+        # 支払い確率を正規化
+        sum_raw = sum(raw for raw in pay_raws if raw is not None)
+        
+        # 各顔の支払い確率を計算
+        for i, pay_raw in enumerate(pay_raws):
+            if pay_raw is not None:
+                # 感情認識に成功した顔
+                if sum_raw > 0:
+                    results[i]["pay"] = pay_raw / (sum_raw + missing_count)
+                else:
+                    # すべての顔の支払い確率の原値が0の場合は均等に分配
+                    results[i]["pay"] = 1.0 / len(pay_raws)
+            else:
+                # 感情認識に失敗した顔
+                if sum_raw > 0:
+                    results[i]["pay"] = 1.0 / (sum_raw + missing_count)
+                else:
+                    # すべての顔の支払い確率の原値が0の場合は均等に分配
+                    results[i]["pay"] = 1.0 / len(pay_raws)
         
         # レスポンスを作成
         response = {

@@ -64,7 +64,16 @@ def test_face_emotion_api():
                 else:
                     print(f"  最も強い感情: {result['dominant']}")
                     print(f"  感情スコア: {json.dumps(result['scores'], indent=2, ensure_ascii=False)}")
+                print(f"  支払い確率: {result.get('pay', 'N/A')}")
                 print(f"  顔画像のプレビュー: {result['image'][:50]}...")
+            
+            # 支払い確率の合計が1になることを確認
+            total_pay = sum(result.get('pay', 0) for result in data['results'])
+            print(f"\n支払い確率の合計: {total_pay}")
+            if abs(total_pay - 1.0) < 0.001:  # 浮動小数点の誤差を考慮
+                print("支払い確率の合計は1.0です（正常）")
+            else:
+                print(f"警告: 支払い確率の合計が1.0ではありません: {total_pay}")
     
     except Exception as e:
         print(f"エラー: {str(e)}")
