@@ -13,6 +13,82 @@ if project_root not in sys.path:
 from src.service.pizza_split.pizza_segmentation_service import PizzaSegmentationService
 from src.service.pizza_split.salami_segmentation_service import SalamiSegmentationService
 
+
+class PizzaScoreCalculator:
+    """
+    ピザとサラミの分割面積を計算し、スコアを算出するクラス
+    """
+    
+    def __init__(self):
+        """初期化"""
+        self.pizza_service = PizzaSegmentationService()
+        self.salami_service = SalamiSegmentationService()
+    
+    def calculate_areas(self, image_path, use_preprocessing=True, debug=False):
+        """
+        ピザとサラミの面積を計算
+        
+        Args:
+            image_path: 画像パス
+            use_preprocessing: 前処理（楕円→円変換）を使用するか
+            debug: デバッグ出力を有効にするか
+            
+        Returns:
+            dict: ピザとサラミの面積情報
+        """
+        results = process_pizza_image(image_path, isDebug=debug)
+        
+        # 各領域のピザとサラミの面積を計算
+        region_stats = results.get('region_stats', {})
+        
+        return {
+            'pizza_areas': [stat.get('pizza_area', 0) for stat in region_stats.values()],
+            'salami_areas': [stat.get('salami_area', 0) for stat in region_stats.values()],
+            'salami_ratios': [stat.get('salami_ratio', 0) for stat in region_stats.values()],
+            'pizza_total_area': sum(stat.get('pizza_area', 0) for stat in region_stats.values()),
+            'salami_total_area': sum(stat.get('salami_area', 0) for stat in region_stats.values()),
+            'region_count': len(region_stats),
+            'region_stats': region_stats
+        }
+    
+    def calculate_score(self, areas_dict):
+        """
+        面積情報からスコアを計算
+        
+        Args:
+            areas_dict: calculate_areas()の返り値
+            
+        Returns:
+            float: 0-100のスコア
+        """
+        pizza_areas = areas_dict.get('pizza_areas', [])
+        salami_areas = areas_dict.get('salami_areas', [])
+        
+        if not pizza_areas:
+            return 0.0
+        
+        # ピザとサラミの面積の標準偏差を計算
+        pizza_std = np.std(pizza_areas) if len(pizza_areas) > 1 else 0
+        salami_std = np.std(salami_areas) if len(salami_areas) > 1 and sum(salami_areas) > 0 else 0
+        
+        # ピザの平均面積に対する標準偏差の比率
+        pizza_mean = np.mean(pizza_areas)
+        pizza_std_ratio = pizza_std / pizza_mean if pizza_mean > 0 else 1.0
+        
+        # サラミの平均面積に対する標準偏差の比率
+        salami_mean = np.mean(salami_areas) if sum(salami_areas) > 0 else 1.0
+        salami_std_ratio = salami_std / salami_mean if salami_mean > 0 else 1.0
+        
+        # スコア計算（標準偏差が小さいほど高スコア）
+        pizza_score = max(0, 100 - 500 * pizza_std_ratio)
+        salami_score = max(0, 100 - 1000 * salami_std_ratio) if sum(salami_areas) > 0 else 0
+        
+        # ピザとサラミの重み付けスコア（サラミは重要度が高い）
+        final_score = 0.3 * pizza_score + 0.7 * salami_score
+        
+        return final_score
+
+
 def process_pizza_image(image_path, output_dir=None, isDebug=False):
     """
     Process pizza image through the complete pipeline:

@@ -4,11 +4,12 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      - "9000:8000"
     volumes:
       - .:/app
     environment:
       - PORT=8000
+      - PYTHONPATH=/app
       # Add your other environment variables here
       # - DATABASE_URL=...
       # - PAYPAY_API_KEY=...

@@ -4,7 +4,7 @@
 cutted.jpegとcutted2.jpegの面積を計算
 """
 
-from score import PizzaScoreCalculator
+from src.service.pizza_split.score import PizzaScoreCalculator
 from pathlib import Path
 
 def main():
