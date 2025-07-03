@@ -340,18 +340,13 @@ class PizzaDivider:
         
         # このピースのモンテカルロ点を描画
         idx = self.pieces[piece_index]
-        cmap = plt.get_cmap('tab10', self.n)
-        color = cmap(piece_index)
-        color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
-                                                  int(color[1]*255), 
-                                                  int(color[2]*255))
         
         # モンテカルロ点を四角形で描画
         for j in idx:
             px, py = transform_point(self.px[j], self.py[j])
             dwg.add(dwg.rect(insert=(px - dot_size/2, py - dot_size/2),
                             size=(dot_size, dot_size),
-                            fill=color_hex,
+                            fill="currentColor",
                             opacity=0.45))
         
         # サラミを描画（すべて表示）
@@ -723,16 +718,10 @@ class PizzaDivider:
                             hull_points = [self._transform_to_svg_coords(piece_points[j][0], piece_points[j][1], svg_size) 
                                           for j in hull.vertices]
                             
-                            cmap = plt.get_cmap('tab10', self.n)
-                            color = cmap(i)
-                            color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
-                                                                      int(color[1]*255), 
-                                                                      int(color[2]*255))
-                            
                             combined_dwg.add(combined_dwg.polygon(points=hull_points,
-                                                                fill=color_hex,
+                                                                fill="currentColor",
                                                                 opacity=0.6,
-                                                                stroke=color_hex,
+                                                                stroke="currentColor",
                                                                 stroke_width=0.5))
                         except:
                             pass
@@ -775,11 +764,6 @@ class PizzaDivider:
             SVGコンテンツ文字列（g要素の中身）
         """
         idx = self.pieces[piece_index]
-        cmap = plt.get_cmap('tab10', self.n)
-        color = cmap(piece_index)
-        color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
-                                                  int(color[1]*255), 
-                                                  int(color[2]*255))
         
         # ピースの凸包を計算
         piece_points = [(self.px[j], self.py[j]) for j in idx]
@@ -795,7 +779,7 @@ class PizzaDivider:
             
             # ポリゴンを作成
             polygon_str = f'<polygon points="{" ".join([f"{x},{y}" for x, y in hull_points])}" '
-            polygon_str += f'fill="{color_hex}" opacity="0.6" stroke="{color_hex}" stroke-width="0.5"/>'
+            polygon_str += f'fill="currentColor" opacity="0.6" stroke="currentColor" stroke-width="0.5"/>'
             
             return polygon_str
         except:
@@ -831,11 +815,6 @@ class PizzaDivider:
             
             # ピースの形状を追加
             idx = self.pieces[i]
-            cmap = plt.get_cmap('tab10', self.n)
-            color = cmap(i)
-            color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
-                                                      int(color[1]*255), 
-                                                      int(color[2]*255))
             
             # 凸包を計算
             piece_points = [(self.px[j], self.py[j]) for j in idx]
@@ -848,9 +827,9 @@ class PizzaDivider:
                                   for j in hull.vertices]
                     
                     piece_layer.add(dwg.polygon(points=hull_points,
-                                              fill=color_hex,
+                                              fill="currentColor",
                                               opacity=0.6,
-                                              stroke=color_hex,
+                                              stroke="currentColor",
                                               stroke_width=0.5))
                 except:
                     pass
@@ -953,16 +932,9 @@ class PizzaDivider:
                         ty -= offset_y  # Y軸は反転しているため
                         hull_points.append((tx, ty))
                     
-                    # 色を取得
-                    cmap = plt.get_cmap('tab10', self.n)
-                    color = cmap(i)
-                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
-                                                              int(color[1]*255), 
-                                                              int(color[2]*255))
-                    
                     # ピースを描画
                     dwg.add(dwg.polygon(points=hull_points,
-                                      fill=color_hex,
+                                      fill="currentColor",
                                       opacity=0.7,
                                       stroke='darkgray',
                                       stroke_width=1))
@@ -1072,14 +1044,8 @@ class PizzaDivider:
                                                                 svg_size) 
                                   for j in hull.vertices]
                     
-                    cmap = plt.get_cmap('tab10', self.n)
-                    color = cmap(i)
-                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
-                                                              int(color[1]*255), 
-                                                              int(color[2]*255))
-                    
                     piece_group.add(dwg.polygon(points=hull_points,
-                                              fill=color_hex,
+                                              fill="currentColor",
                                               opacity=0.7,
                                               stroke='darkgray',
                                               stroke_width=1))
@@ -1185,16 +1151,9 @@ class PizzaDivider:
                     clip_path = dwg.defs.add(dwg.clipPath(id=clip_id))
                     clip_path.add(dwg.polygon(points=hull_points))
                     
-                    # 色を取得
-                    cmap = plt.get_cmap('tab10', self.n)
-                    color = cmap(i)
-                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
-                                                              int(color[1]*255), 
-                                                              int(color[2]*255))
-                    
                     # ピースを描画
                     piece_group.add(dwg.polygon(points=hull_points,
-                                               fill=color_hex,
+                                               fill="currentColor",
                                                opacity=0.7,
                                                stroke='darkgray',
                                                stroke_width=1))
@@ -1484,21 +1443,14 @@ class PizzaDivider:
                     clip_path = dwg.defs.add(dwg.clipPath(id=clip_id))
                     
                     # アニメーション付きクリッピングパス
-                    clip_polygon = clip_path.add(dwg.polygon(points=hull_points))
-                    
-                    # 色を取得
-                    cmap = plt.get_cmap('tab10', self.n)
-                    color = cmap(i)
-                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
-                                                              int(color[1]*255), 
-                                                              int(color[2]*255))
+                    clip_path.add(dwg.polygon(points=hull_points))
                     
                     # ピースの背景を描画
-                    piece_polygon = piece_group.add(dwg.polygon(points=hull_points,
-                                                               fill=color_hex,
-                                                               opacity=0.8,
-                                                               stroke='darkgray',
-                                                               stroke_width=1))
+                    piece_group.add(dwg.polygon(points=hull_points,
+                                               fill="currentColor",
+                                               opacity=0.8,
+                                               stroke='darkgray',
+                                               stroke_width=1))
                     
                     # サラミグループ（クリッピング適用）
                     salami_group = piece_group.add(dwg.g(clip_path=f'url(#{clip_id})'))
@@ -1596,9 +1548,6 @@ class PizzaDivider:
         """
         svg_contents = []
         
-        # カラーマップを準備
-        cmap = plt.get_cmap('tab10', self.n)
-        
         for i in range(self.n):
             # SVGを作成
             dwg = svgwrite.Drawing(size=(svg_size, svg_size))
@@ -1622,12 +1571,6 @@ class PizzaDivider:
                         ty = (-y + 1.2) * svg_size / 2.4
                         hull_points.append((tx, ty))
                     
-                    # ピースの色
-                    color = cmap(i)
-                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
-                                                              int(color[1]*255), 
-                                                              int(color[2]*255))
-                    
                     # クリッピングパスを定義
                     clip_id = f'piece_clip_{i}'
                     clip_path = dwg.defs.add(dwg.clipPath(id=clip_id))
@@ -1635,7 +1578,7 @@ class PizzaDivider:
                     
                     # ピースのポリゴンを描画
                     dwg.add(dwg.polygon(points=hull_points,
-                                       fill=color_hex,
+                                       fill="currentColor",
                                        opacity=0.8,
                                        stroke='darkgray',
                                        stroke_width=2))
