@@ -12,7 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Split heavy dependencies for better layer caching
+RUN pip install --no-cache-dir --timeout=300 --retries=3 torch torchvision tensorflow
+RUN pip install --no-cache-dir --timeout=300 --retries=3 -r requirements.txt
 
 # Copy YOLOv8 model
 COPY yolov8n-seg.pt .
