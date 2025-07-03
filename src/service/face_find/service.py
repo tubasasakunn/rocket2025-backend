@@ -8,13 +8,8 @@
 
 import cv2
 import numpy as np
-import base64
-import re
 import logging
 from typing import Dict, List, Union, Optional, Tuple
-
-# バイナリユーティリティ関数をインポート
-from utils.binary import safe_b64decode, safe_b64encode, format_image_data_uri
 
 # ロガーの設定
 logger = logging.getLogger("app.service.face_find")
@@ -36,26 +31,19 @@ class FaceFindService:
         # 顔検出器の読み込み
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         
-    def _base64_to_image(self, base64_str: str) -> np.ndarray:
+    def _bytes_to_image(self, image_bytes: bytes) -> np.ndarray:
         """
-        Base64文字列をOpenCV画像に変換
+        バイト列をOpenCV画像に変換
         
         Parameters:
-        - base64_str: Base64エンコードされた画像データ
+        - image_bytes: 画像のバイト列
         
         Returns:
         - np.ndarray: OpenCV形式の画像
         """
         try:
-            # 安全なデコード関数を使用
-            img_data, success = safe_b64decode(base64_str)
-            
-            if not success or img_data is None:
-                logger.error("Base64のデコードに失敗しました")
-                raise ValueError("Base64データのデコードに失敗しました")
-                
             # バイナリデータからOpenCV形式の画像に変換
-            img = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
+            img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
             
             if img is None:
                 logger.error("画像形式が不正です")
@@ -63,78 +51,61 @@ class FaceFindService:
                 
             return img
             
-        except UnicodeDecodeError as e:
-            # UnicodeDecodeErrorが発生した場合、より明確なエラーメッセージを提供
-            logger.error(f"Unicode デコードエラー: {str(e)}")
-            raise ValueError(f"Base64データのデコードに失敗しました: {str(e)}")
         except Exception as e:
             logger.error(f"画像変換エラー: {str(e)}")
             raise ValueError(f"画像変換中にエラーが発生しました: {str(e)}")
     
-    def _image_to_base64(self, img: np.ndarray) -> str:
+    def _image_to_bytes(self, img: np.ndarray) -> bytes:
         """
-        OpenCV画像をBase64文字列に変換
+        OpenCV画像をバイト列に変換
         
         Parameters:
         - img: OpenCV形式の画像
         
         Returns:
-        - str: Base64エンコードされた画像データ (data:image/jpeg;base64, プレフィックス付き)
+        - bytes: JPEG形式のバイト列
         """
         try:
             # JPEG形式に変換
             _, buffer = cv2.imencode('.jpg', img)
-            
-            # 安全なエンコード関数を使用
-            return format_image_data_uri(buffer)
+            return buffer.tobytes()
         except Exception as e:
-            logger.error(f"画像のBase64エンコード中にエラー: {str(e)}")
-            # エラー時はデフォルトの変換方法を使用
-            _, buffer = cv2.imencode('.jpg', img)
-            base64_str = base64.b64encode(buffer).decode('utf-8', errors='replace')
-            return f"data:image/jpeg;base64,{base64_str}"
+            logger.error(f"画像のバイト変換中にエラー: {str(e)}")
+            raise ValueError(f"画像のバイト変換に失敗しました: {str(e)}")
     
-    def _create_placeholder_image(self) -> str:
+    def _create_placeholder_image(self) -> None:
         """
         プレースホルダー用の空白画像を生成
         
         Returns:
-        - str: プレースホルダー画像のBase64エンコードデータ (placeholder:// プレフィックス付き)
+        - None: プレースホルダーを示すNone値
         """
-        # 200x200の白画像を生成
-        placeholder = np.zeros((200, 200, 3), dtype=np.uint8)
-        placeholder.fill(255)  # 白色で塗りつぶし
-        
-        # Base64にエンコード
-        placeholder_b64 = self._image_to_base64(placeholder)
-        
-        # プレースホルダーであることを示すプレフィックスを追加
-        return f"placeholder://{placeholder_b64}"
+        return None
     
-    def analyze(self, image_b64: str, expected_count: int) -> Dict[str, Union[int, List[str]]]:
+    def analyze(self, image_bytes: bytes, expected_count: int) -> Dict[str, Union[int, List[Optional[bytes]]]]:
         """
         画像から顔を検出し、リサイズして返す
         
         Parameters:
-        - image_b64: Base64エンコードされた画像データ
+        - image_bytes: 画像のバイト列
         - expected_count: 期待される顔の数
         
         Returns:
         - detected: 検出された顔の数
-        - faces: 検出された顔の画像（Base64エンコード、200x200にリサイズ済み）
-                 検出数が期待値に満たない場合はプレースホルダー画像で補完
+        - faces: 検出された顔の画像（バイト列、200x200にリサイズ済み）
+                 検出数が期待値に満たない場合はプレースホルダー（None）で補完
         
         Raises:
         - ValueError: 画像が無効な場合
         """
         # 画像が空の場合
-        if not image_b64:
+        if not image_bytes:
             logger.error("空の画像データが指定されました")
             raise ValueError("画像データが空です")
         
-        # Base64をOpenCV画像に変換
+        # バイト列をOpenCV画像に変換
         try:
-            img = self._base64_to_image(image_b64)
+            img = self._bytes_to_image(image_bytes)
         except Exception as e:
             logger.error(f"画像のデコードに失敗: {str(e)}")
             raise ValueError(f"画像のデコードに失敗しました: {str(e)}")
@@ -165,7 +136,7 @@ class FaceFindService:
                 "faces": face_images
             }
         
-        # 検出された顔をリサイズしてBase64に変換
+        # 検出された顔をリサイズしてバイト列に変換
         face_images = []
         for (x, y, w, h) in faces:
             # 顔の領域を切り出し
@@ -174,11 +145,11 @@ class FaceFindService:
             # 200x200にリサイズ
             face_resized = cv2.resize(face_roi, (200, 200))
             
-            # Base64に変換
-            face_b64 = self._image_to_base64(face_resized)
+            # バイト列に変換
+            face_bytes = self._image_to_bytes(face_resized)
             
             # リストに追加
-            face_images.append(face_b64)
+            face_images.append(face_bytes)
         
         # 検出数が期待値に満たない場合、プレースホルダーで補完
         detected_count = len(faces)
