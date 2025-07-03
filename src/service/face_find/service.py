@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 import base64
 import re
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Union, Optional, Tuple
 
 
 class FaceFindService:
@@ -69,6 +69,23 @@ class FaceFindService:
         # data:image/jpeg;base64, プレフィックスを追加
         return f"data:image/jpeg;base64,{base64_str}"
     
+    def _create_placeholder_image(self) -> str:
+        """
+        プレースホルダー用の空白画像を生成
+        
+        Returns:
+        - str: プレースホルダー画像のBase64エンコードデータ (placeholder:// プレフィックス付き)
+        """
+        # 200x200の白画像を生成
+        placeholder = np.zeros((200, 200, 3), dtype=np.uint8)
+        placeholder.fill(255)  # 白色で塗りつぶし
+        
+        # Base64にエンコード
+        placeholder_b64 = self._image_to_base64(placeholder)
+        
+        # プレースホルダーであることを示すプレフィックスを追加
+        return f"placeholder://{placeholder_b64}"
+    
     def analyze(self, image_b64: str, expected_count: int) -> Dict[str, Union[int, List[str]]]:
         """
         画像から顔を検出し、リサイズして返す
@@ -80,9 +97,10 @@ class FaceFindService:
         Returns:
         - detected: 検出された顔の数
         - faces: 検出された顔の画像（Base64エンコード、200x200にリサイズ済み）
+                 検出数が期待値に満たない場合はプレースホルダー画像で補完
         
         Raises:
-        - ValueError: 画像が無効、または期待される顔の数と検出された顔の数が一致しない場合
+        - ValueError: 画像が無効な場合
         """
         # 画像が空の場合
         if not image_b64:
@@ -111,11 +129,12 @@ class FaceFindService:
         
         # 顔が検出されなかった場合
         if len(faces) == 0:
-            raise ValueError("画像から顔を検出できませんでした")
-        
-        # 期待される顔の数と検出された顔の数が一致しない場合
-        if len(faces) != expected_count:
-            raise ValueError(f"期待される顔の数({expected_count})と検出された顔の数({len(faces)})が一致しません")
+            # プレースホルダー画像で補完
+            face_images = [self._create_placeholder_image() for _ in range(expected_count)]
+            return {
+                "detected": 0,
+                "faces": face_images
+            }
         
         # 検出された顔をリサイズしてBase64に変換
         face_images = []
@@ -132,7 +151,18 @@ class FaceFindService:
             # リストに追加
             face_images.append(face_b64)
         
+        # 検出数が期待値に満たない場合、プレースホルダーで補完
+        detected_count = len(faces)
+        if detected_count < expected_count:
+            for _ in range(expected_count - detected_count):
+                face_images.append(self._create_placeholder_image())
+        
+        # 検出数が期待値を超える場合は、期待値分だけ返す
+        if detected_count > expected_count:
+            face_images = face_images[:expected_count]
+            detected_count = expected_count
+        
         return {
-            "detected": len(faces),
+            "detected": detected_count,
             "faces": face_images
         }

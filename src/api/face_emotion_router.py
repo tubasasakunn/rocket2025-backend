@@ -91,23 +91,44 @@ async def face_emotion(request: FaceFindRequest):
         # 各顔に対して感情認識を実行
         results = []
         for face_b64 in face_result["faces"]:
-            # Base64から画像バイナリに変換
-            if 'base64,' in face_b64:
-                face_data = face_b64.split('base64,')[1]
+            # プレースホルダー画像かどうかを確認
+            if face_b64.startswith("placeholder://"):
+                # プレースホルダーの場合、プレフィックスを削除して画像部分だけを取得
+                image_part = face_b64.replace("placeholder://", "")
+                
+                # 結果を追加（感情認識はNull）
+                results.append({
+                    "image": image_part,
+                    "dominant": None,
+                    "scores": None
+                })
             else:
-                face_data = face_b64
-            
-            face_bytes = base64.b64decode(face_data)
-            
-            # 感情認識を実行
-            emotion_result = emotion_service.analyze(face_bytes)
-            
-            # 結果を追加
-            results.append({
-                "image": face_b64,
-                "dominant": emotion_result["dominant"],
-                "scores": emotion_result["scores"]
-            })
+                # 通常の顔画像の場合
+                # Base64から画像バイナリに変換
+                if 'base64,' in face_b64:
+                    face_data = face_b64.split('base64,')[1]
+                else:
+                    face_data = face_b64
+                
+                face_bytes = base64.b64decode(face_data)
+                
+                # 感情認識を実行
+                try:
+                    emotion_result = emotion_service.analyze(face_bytes)
+                    
+                    # 結果を追加
+                    results.append({
+                        "image": face_b64,
+                        "dominant": emotion_result["dominant"],
+                        "scores": emotion_result["scores"]
+                    })
+                except Exception as e:
+                    # 感情認識に失敗した場合は null を設定
+                    results.append({
+                        "image": face_b64,
+                        "dominant": None,
+                        "scores": {}
+                    })
         
         # レスポンスを作成
         response = {
@@ -202,23 +223,44 @@ async def face_emotion_form(
         # 各顔に対して感情認識を実行
         results = []
         for face_b64 in face_result["faces"]:
-            # Base64から画像バイナリに変換
-            if 'base64,' in face_b64:
-                face_data = face_b64.split('base64,')[1]
+            # プレースホルダー画像かどうかを確認
+            if face_b64.startswith("placeholder://"):
+                # プレースホルダーの場合、プレフィックスを削除して画像部分だけを取得
+                image_part = face_b64.replace("placeholder://", "")
+                
+                # 結果を追加（感情認識はNull）
+                results.append({
+                    "image": image_part,
+                    "dominant": None,
+                    "scores": None
+                })
             else:
-                face_data = face_b64
-            
-            face_bytes = base64.b64decode(face_data)
-            
-            # 感情認識を実行
-            emotion_result = emotion_service.analyze(face_bytes)
-            
-            # 結果を追加
-            results.append({
-                "image": face_b64,
-                "dominant": emotion_result["dominant"],
-                "scores": emotion_result["scores"]
-            })
+                # 通常の顔画像の場合
+                # Base64から画像バイナリに変換
+                if 'base64,' in face_b64:
+                    face_data = face_b64.split('base64,')[1]
+                else:
+                    face_data = face_b64
+                
+                face_bytes = base64.b64decode(face_data)
+                
+                # 感情認識を実行
+                try:
+                    emotion_result = emotion_service.analyze(face_bytes)
+                    
+                    # 結果を追加
+                    results.append({
+                        "image": face_b64,
+                        "dominant": emotion_result["dominant"],
+                        "scores": emotion_result["scores"]
+                    })
+                except Exception as e:
+                    # 感情認識に失敗した場合は null を設定
+                    results.append({
+                        "image": face_b64,
+                        "dominant": None,
+                        "scores": {}
+                    })
         
         # レスポンスを作成
         response = {

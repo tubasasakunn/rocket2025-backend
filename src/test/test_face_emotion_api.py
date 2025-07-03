@@ -59,8 +59,11 @@ def test_face_emotion_api():
             # 各顔の感情認識結果を表示
             for i, result in enumerate(data['results']):
                 print(f"\n顔 {i+1}:")
-                print(f"  最も強い感情: {result['dominant']}")
-                print(f"  感情スコア: {json.dumps(result['scores'], indent=2, ensure_ascii=False)}")
+                if result['dominant'] is None:
+                    print(f"  検出なし（プレースホルダー）")
+                else:
+                    print(f"  最も強い感情: {result['dominant']}")
+                    print(f"  感情スコア: {json.dumps(result['scores'], indent=2, ensure_ascii=False)}")
                 print(f"  顔画像のプレビュー: {result['image'][:50]}...")
     
     except Exception as e:

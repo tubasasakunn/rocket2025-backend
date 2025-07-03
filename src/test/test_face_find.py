@@ -73,7 +73,7 @@ def test_face_find_success_match_count():
 
 def test_face_find_mismatch_count():
     """
-    顔検出APIの異常系テスト - 期待する顔の数と一致しない場合
+    顔検出APIのテスト - 期待する顔の数と一致しない場合（プレースホルダーで補完）
     """
     # テスト用の顔画像ファイルパス
     image_path = RESOURCE_DIR / "face.jpg"
@@ -93,9 +93,25 @@ def test_face_find_mismatch_count():
     # APIリクエスト
     response = client.post("/api/face/find", json=request_data)
     
-    # 400 Bad Request が返ることを確認
-    assert response.status_code == 400, f"期待する顔の数と一致しないエラーが発生しませんでした: {response.status_code}"
-    assert "期待される顔の数" in response.json()["detail"], "エラーメッセージが正しくありません"
+    # 200 OK が返ることを確認
+    assert response.status_code == 200, f"APIエラー: {response.text}"
+    
+    # レスポンスの内容を検証
+    data = response.json()
+    assert "detected" in data, "レスポンスに 'detected' キーがありません"
+    assert "faces" in data, "レスポンスに 'faces' キーがありません"
+    
+    # 検出された顔の数が実際の数と一致することを確認
+    assert data["detected"] == 1, f"検出された顔の数が期待と一致しません: {data['detected']}"
+    
+    # 返された顔画像の数が期待値と一致することを確認
+    assert len(data["faces"]) == 2, f"返された顔画像の数が期待と一致しません: {len(data['faces'])}"
+    
+    # 最初の顔画像がBase64形式であることを確認
+    assert data["faces"][0].startswith("data:image/jpeg;base64,"), "顔画像がBase64形式ではありません"
+    
+    # 2番目の顔画像がプレースホルダーであることを確認
+    assert data["faces"][1].startswith("placeholder://"), "2番目の顔画像がプレースホルダーではありません"
 
 
 def test_face_find_empty_image():
@@ -118,7 +134,7 @@ def test_face_find_empty_image():
 
 def test_face_find_no_face():
     """
-    顔検出APIの異常系テスト - 顔が含まれない画像を送信した場合
+    顔検出APIのテスト - 顔が含まれない画像を送信した場合（プレースホルダーで補完）
     
     注: このテストはピザの画像など、顔が含まれない画像を使用します。
     """
@@ -140,6 +156,19 @@ def test_face_find_no_face():
     # APIリクエスト
     response = client.post("/api/face/find", json=request_data)
     
-    # 400 Bad Request が返ることを確認
-    assert response.status_code == 400, f"顔なしエラーが発生しませんでした: {response.status_code}"
-    assert "顔を検出できませんでした" in response.json()["detail"], "エラーメッセージが正しくありません"
+    # 200 OK が返ることを確認
+    assert response.status_code == 200, f"APIエラー: {response.text}"
+    
+    # レスポンスの内容を検証
+    data = response.json()
+    assert "detected" in data, "レスポンスに 'detected' キーがありません"
+    assert "faces" in data, "レスポンスに 'faces' キーがありません"
+    
+    # 検出された顔の数が0であることを確認
+    assert data["detected"] == 0, f"検出された顔の数が期待と一致しません: {data['detected']}"
+    
+    # 返された顔画像の数が期待値と一致することを確認
+    assert len(data["faces"]) == 1, f"返された顔画像の数が期待と一致しません: {len(data['faces'])}"
+    
+    # 顔画像がプレースホルダーであることを確認
+    assert data["faces"][0].startswith("placeholder://"), "顔画像がプレースホルダーではありません"
