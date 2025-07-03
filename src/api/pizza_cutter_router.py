@@ -29,11 +29,9 @@ class PizzaAnalysisResponse(BaseModel):
 class PizzaDivisionResponse(BaseModel):
     """ピザ分割結果のレスポンス"""
     success: bool
-    overall_svg: Optional[str] = None
-    piece_svgs: List[str] = []
-    pizza_circle: Optional[Dict[str, Any]] = None
-    salami_circles: List[Dict[str, Any]] = []
-    preprocessing_applied: bool = False
+    svg_before_explosion: Optional[str] = None  # 爆発前のSVG
+    svg_after_explosion: Optional[str] = None   # 爆発後のSVG
+    svg_animated: Optional[str] = None          # アニメーション付きSVG
     error_message: Optional[str] = None
 
 
@@ -163,84 +161,32 @@ async def divide_pizza(
             quiet=True
         )
         
-        # 各ピースのSVGコンテンツを生成
-        piece_svg_contents = []
-        if 'cut_edges' in result and 'pieces' in result:
-            # dividerの機能を再現するため、必要な情報を設定
-            from service.pizza_split.salami_devide import PizzaDivider
-            from service.pizza_split.postprocess import PostprocessService
-            
-            # サラミ半径の平均値を計算
-            salami_radii = [r for _, r in result['salami_circles']]
-            avg_salami_radius = np.mean(salami_radii) / result['pizza_radius'] if salami_radii else 0.1
-            
-            # ダミーのdividerインスタンスを作成（実際の分割は既に完了しているため）
-            divider = PizzaDivider(
-                R_pizza=1.0,
-                R_salami=avg_salami_radius,
-                m=len(result['salami_circles']),
-                n=n_pieces,
-                N_Monte=50000,
-                seed=42,
-                isDebug=False
-            )
-            
-            # 既に計算された結果を設定
-            divider.pieces = result['pieces']
-            divider.cut_edges = result['cut_edges']
-            divider.n = n_pieces
-            
-            # 正規化されたサラミ位置を設定
-            normalized_salami = []
-            for (cx, cy), r in result['salami_circles']:
-                norm_x = (cx - result['pizza_center'][0]) / result['pizza_radius']
-                norm_y = (cy - result['pizza_center'][1]) / result['pizza_radius']
-                normalized_salami.append((norm_x, norm_y))
-            divider.centers = np.array(normalized_salami)
-            
-            # モンテカルロ点を生成（必要なため）
-            divider.generate_monte_carlo_points()
-            divider.px = result.get('px', divider.px) if 'px' in result else divider.px
-            divider.py = result.get('py', divider.py) if 'py' in result else divider.py
-            
-            # 各ピースの境界を取得
-            piece_boundaries = divider.get_piece_boundaries_for_postprocess()
-            
-            # PostprocessServiceを使用して各ピースのSVGを生成
-            postprocess_service = PostprocessService()
-            for i, boundaries in enumerate(piece_boundaries):
-                if boundaries:  # 境界が存在する場合のみ
-                    svg_content = postprocess_service.create_piece_svg_content_on_original(
-                        str(upload_path),
-                        boundaries,
-                        result['salami_circles'],
-                        result['pizza_center'],
-                        result['pizza_radius'],
-                        result['preprocess_info'],
-                        i
-                    )
-                    piece_svg_contents.append(svg_content)
-                else:
-                    # 境界が計算できない場合は空のSVGを追加
-                    piece_svg_contents.append('<svg></svg>')
+        # 爆発SVGを読み込む
+        svg_before = None
+        svg_after = None
+        svg_animated = None
+        
+        # return_svg_onlyの場合、SVGパスが返される
+        if 'svg_before_original' in result and result['svg_before_original']:
+            before_path = Path(result['svg_before_original'])
+            if before_path.exists():
+                svg_before = before_path.read_text()
+        
+        if 'svg_after_original' in result and result['svg_after_original']:
+            after_path = Path(result['svg_after_original'])
+            if after_path.exists():
+                svg_after = after_path.read_text()
+        
+        if 'svg_animated_original' in result and result['svg_animated_original']:
+            animated_path = Path(result['svg_animated_original'])
+            if animated_path.exists():
+                svg_animated = animated_path.read_text()
         
         return PizzaDivisionResponse(
             success=True,
-            overall_svg=result.get('svg_content', ''),
-            piece_svgs=piece_svg_contents,
-            pizza_circle={
-                "center": {"x": float(result['pizza_center'][0]), "y": float(result['pizza_center'][1])},
-                "radius": float(result['pizza_radius'])
-            },
-            salami_circles=[
-                {
-                    "id": i + 1,
-                    "center": {"x": float(center[0]), "y": float(center[1])},
-                    "radius": float(radius)
-                }
-                for i, (center, radius) in enumerate(result['salami_circles'])
-            ],
-            preprocessing_applied=result['preprocess_info'].get('is_transformed', False)
+            svg_before_explosion=svg_before,
+            svg_after_explosion=svg_after,
+            svg_animated=svg_animated
         )
     
     except Exception as e:

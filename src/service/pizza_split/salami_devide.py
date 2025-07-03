@@ -14,6 +14,7 @@ import os
 from datetime import datetime
 import svgwrite
 from pathlib import Path
+from scipy.spatial import ConvexHull
 
 
 class PizzaDivider:
@@ -473,7 +474,6 @@ class PizzaDivider:
             return (tx, ty)
         
         # ピースの背景（凸包を近似的に表現）とクリッピングパスの作成
-        from scipy.spatial import ConvexHull
         hull_points = []
         
         if len(piece_points) > 3:
@@ -563,7 +563,6 @@ class PizzaDivider:
             SVGコンテンツ文字列
         """
         # SVG作成（StringIOを使用）
-        import io
         dwg = svgwrite.Drawing(size=(svg_size, svg_size))
         
         # 背景を設定
@@ -590,7 +589,6 @@ class PizzaDivider:
             return (tx, ty)
         
         # ピースの背景（凸包を近似的に表現）とクリッピングパスの作成
-        from scipy.spatial import ConvexHull
         hull_points = []
         
         if len(piece_points) > 3:
@@ -667,7 +665,6 @@ class PizzaDivider:
                 continue
             
             # 凸包を計算して境界点を取得
-            from scipy.spatial import ConvexHull
             try:
                 hull = ConvexHull(piece_points)
                 boundary_points = [(piece_points[v][0], piece_points[v][1]) 
@@ -678,6 +675,917 @@ class PizzaDivider:
                 piece_boundaries_list.append([])
         
         return piece_boundaries_list
+    
+    def combine_isolated_svgs(self, input_dir, output_path, svg_size=800):
+        """
+        単独表示版SVGを組み合わせて全体表示を再現
+        
+        Args:
+            input_dir: 単独表示版SVGが保存されているディレクトリ
+            output_path: 出力する結合SVGのパス
+            svg_size: 出力SVGのサイズ
+        """
+        from pathlib import Path
+        
+        input_dir = Path(input_dir)
+        
+        # 結合用のSVGを作成
+        combined_dwg = svgwrite.Drawing(output_path, size=(svg_size, svg_size))
+        combined_dwg.add(combined_dwg.rect((0, 0), (svg_size, svg_size), fill='white'))
+        
+        # ピザの背景円を描画
+        center = (svg_size / 2, svg_size / 2)
+        radius = self.R_pizza * svg_size / 2.4
+        combined_dwg.add(combined_dwg.circle(center=center, r=radius,
+                                           fill='bisque', stroke='saddlebrown', stroke_width=3))
+        
+        # 各ピースのSVGを読み込んで配置
+        for i in range(self.n):
+            svg_path = input_dir / f"piece_{i+1}_isolated.svg"
+            if not svg_path.exists():
+                self._log(f"警告: {svg_path} が見つかりません")
+                continue
+            
+            # SVGコンテンツを直接生成（元の位置に配置）
+            piece_content = self._generate_piece_content_at_original_position(i, svg_size)
+            
+            # グループとして追加
+            if piece_content:
+                # XMLを直接解析して要素を追加
+                try:
+                    # svgwriteの要素として再構築
+                    idx = self.pieces[i]
+                    piece_points = [(self.px[j], self.py[j]) for j in idx]
+                    
+                    if len(piece_points) >= 3:
+                        try:
+                            hull = ConvexHull(piece_points)
+                            hull_points = [self._transform_to_svg_coords(piece_points[j][0], piece_points[j][1], svg_size) 
+                                          for j in hull.vertices]
+                            
+                            cmap = plt.get_cmap('tab10', self.n)
+                            color = cmap(i)
+                            color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
+                                                                      int(color[1]*255), 
+                                                                      int(color[2]*255))
+                            
+                            combined_dwg.add(combined_dwg.polygon(points=hull_points,
+                                                                fill=color_hex,
+                                                                opacity=0.6,
+                                                                stroke=color_hex,
+                                                                stroke_width=0.5))
+                        except:
+                            pass
+                except:
+                    pass
+        
+        # サラミを上に再描画（全体を統一的に表示）
+        for cx, cy in self.centers:
+            center = self._transform_to_svg_coords(cx, cy, svg_size)
+            radius = self.R_salami * svg_size / 2.4
+            combined_dwg.add(combined_dwg.circle(center=center, r=radius,
+                                               fill='indianred', stroke='darkred', 
+                                               stroke_width=1.5, opacity=0.9))
+        
+        # カット線を描画
+        for (e1, e2) in self.cut_edges:
+            p1 = self._transform_to_svg_coords(e1[0], e1[1], svg_size)
+            p2 = self._transform_to_svg_coords(e2[0], e2[1], svg_size)
+            combined_dwg.add(combined_dwg.line(start=p1, end=p2,
+                                             stroke='black', stroke_width=2.5))
+        
+        combined_dwg.save()
+        self._log(f"結合SVG生成完了: {output_path}")
+    
+    def _transform_to_svg_coords(self, x, y, svg_size):
+        """座標をSVG座標系に変換"""
+        tx = (x + 1.2) * svg_size / 2.4
+        ty = (-y + 1.2) * svg_size / 2.4
+        return (tx, ty)
+    
+    def _generate_piece_content_at_original_position(self, piece_index, svg_size):
+        """
+        ピースを元の位置に配置したSVGコンテンツを生成
+        
+        Args:
+            piece_index: ピースのインデックス
+            svg_size: SVGのサイズ
+            
+        Returns:
+            SVGコンテンツ文字列（g要素の中身）
+        """
+        idx = self.pieces[piece_index]
+        cmap = plt.get_cmap('tab10', self.n)
+        color = cmap(piece_index)
+        color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
+                                                  int(color[1]*255), 
+                                                  int(color[2]*255))
+        
+        # ピースの凸包を計算
+        piece_points = [(self.px[j], self.py[j]) for j in idx]
+        
+        if len(piece_points) < 3:
+            return ""
+        
+        # 凸包を計算してポリゴンとして描画
+        try:
+            hull = ConvexHull(piece_points)
+            hull_points = [self._transform_to_svg_coords(piece_points[i][0], piece_points[i][1], svg_size) 
+                          for i in hull.vertices]
+            
+            # ポリゴンを作成
+            polygon_str = f'<polygon points="{" ".join([f"{x},{y}" for x, y in hull_points])}" '
+            polygon_str += f'fill="{color_hex}" opacity="0.6" stroke="{color_hex}" stroke-width="0.5"/>'
+            
+            return polygon_str
+        except:
+            # 凸包の計算に失敗した場合は空文字列
+            return ""
+    
+    def create_layered_svg(self, output_path, svg_size=800):
+        """
+        レイヤー構造を持つSVGを生成（各ピースを独立したレイヤーとして）
+        
+        Args:
+            output_path: 出力SVGファイルパス
+            svg_size: SVGのサイズ
+        """
+        # SVG作成
+        dwg = svgwrite.Drawing(output_path, size=(svg_size, svg_size))
+        
+        # 背景レイヤー
+        background_layer = dwg.g(id='background_layer')
+        background_layer.add(dwg.rect((0, 0), (svg_size, svg_size), fill='white'))
+        
+        # ピザベースレイヤー
+        center = (svg_size / 2, svg_size / 2)
+        radius = self.R_pizza * svg_size / 2.4
+        background_layer.add(dwg.circle(center=center, r=radius,
+                                       fill='bisque', stroke='saddlebrown', stroke_width=3))
+        dwg.add(background_layer)
+        
+        # 各ピースのレイヤー
+        pieces_layer = dwg.g(id='pieces_layer')
+        for i in range(self.n):
+            piece_layer = dwg.g(id=f'piece_{i+1}_layer', class_='pizza-piece')
+            
+            # ピースの形状を追加
+            idx = self.pieces[i]
+            cmap = plt.get_cmap('tab10', self.n)
+            color = cmap(i)
+            color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
+                                                      int(color[1]*255), 
+                                                      int(color[2]*255))
+            
+            # 凸包を計算
+            piece_points = [(self.px[j], self.py[j]) for j in idx]
+            if len(piece_points) >= 3:
+                try:
+                    hull = ConvexHull(piece_points)
+                    hull_points = [self._transform_to_svg_coords(piece_points[j][0], 
+                                                                piece_points[j][1], 
+                                                                svg_size) 
+                                  for j in hull.vertices]
+                    
+                    piece_layer.add(dwg.polygon(points=hull_points,
+                                              fill=color_hex,
+                                              opacity=0.6,
+                                              stroke=color_hex,
+                                              stroke_width=0.5))
+                except:
+                    pass
+            
+            pieces_layer.add(piece_layer)
+        
+        dwg.add(pieces_layer)
+        
+        # サラミレイヤー
+        salami_layer = dwg.g(id='salami_layer')
+        for cx, cy in self.centers:
+            center = self._transform_to_svg_coords(cx, cy, svg_size)
+            radius = self.R_salami * svg_size / 2.4
+            salami_layer.add(dwg.circle(center=center, r=radius,
+                                       fill='indianred', stroke='darkred', 
+                                       stroke_width=1.5, opacity=0.9))
+        dwg.add(salami_layer)
+        
+        # カット線レイヤー
+        cuts_layer = dwg.g(id='cuts_layer')
+        for (e1, e2) in self.cut_edges:
+            p1 = self._transform_to_svg_coords(e1[0], e1[1], svg_size)
+            p2 = self._transform_to_svg_coords(e2[0], e2[1], svg_size)
+            cuts_layer.add(dwg.line(start=p1, end=p2,
+                                   stroke='black', stroke_width=2.5))
+        dwg.add(cuts_layer)
+        
+        # CSSスタイルを追加（オプション）
+        dwg.defs.add(dwg.style('''
+            .pizza-piece {
+                transition: opacity 0.3s ease;
+            }
+            .pizza-piece:hover {
+                opacity: 0.8;
+            }
+        '''))
+        
+        dwg.save()
+        self._log(f"レイヤー構造SVG生成完了: {output_path}")
+    
+    def create_exploded_svg(self, output_path, svg_size=800, explode_factor=0.33):
+        """
+        ピースを円弧方向にずらして表示するSVGを生成（エクスプローデッドビュー）
+        
+        Args:
+            output_path: 出力SVGファイルパス
+            svg_size: SVGのサイズ
+            explode_factor: ずらす距離の係数（半径に対する比率、デフォルト0.33）
+        """
+        # SVG作成
+        dwg = svgwrite.Drawing(output_path, size=(svg_size, svg_size))
+        
+        # 背景
+        dwg.add(dwg.rect((0, 0), (svg_size, svg_size), fill='white'))
+        
+        # ピザの円を薄く描画（ガイドとして）
+        center = (svg_size / 2, svg_size / 2)
+        radius = self.R_pizza * svg_size / 2.4
+        dwg.add(dwg.circle(center=center, r=radius,
+                          fill='none', stroke='lightgray', stroke_width=1,
+                          stroke_dasharray='5,5', opacity=0.5))
+        
+        # 各ピースの中心角度を計算
+        piece_angles = []
+        for i in range(self.n):
+            idx = self.pieces[i]
+            if len(idx) > 0:
+                # 各点の角度を計算
+                angles = np.arctan2(self.py[idx], self.px[idx])
+                # 平均角度を計算（円を横切る場合の処理を含む）
+                mean_angle = np.angle(np.mean(np.exp(1j * angles)))
+                piece_angles.append(mean_angle)
+            else:
+                piece_angles.append(0)
+        
+        # 各ピースを描画（ずらして配置）
+        for i in range(self.n):
+            # ずらす方向と距離を計算
+            angle = piece_angles[i]
+            offset_dist = self.R_pizza * explode_factor * svg_size / 2.4
+            offset_x = offset_dist * np.cos(angle)
+            offset_y = offset_dist * np.sin(angle)
+            
+            # ピースの凸包を計算
+            idx = self.pieces[i]
+            piece_points = [(self.px[j], self.py[j]) for j in idx]
+            
+            if len(piece_points) >= 3:
+                try:
+                    hull = ConvexHull(piece_points)
+                    # 変換してずらした座標を計算
+                    hull_points = []
+                    for j in hull.vertices:
+                        x, y = piece_points[j]
+                        # SVG座標に変換
+                        tx = (x + 1.2) * svg_size / 2.4
+                        ty = (-y + 1.2) * svg_size / 2.4
+                        # ずらしを適用
+                        tx += offset_x
+                        ty -= offset_y  # Y軸は反転しているため
+                        hull_points.append((tx, ty))
+                    
+                    # 色を取得
+                    cmap = plt.get_cmap('tab10', self.n)
+                    color = cmap(i)
+                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
+                                                              int(color[1]*255), 
+                                                              int(color[2]*255))
+                    
+                    # ピースを描画
+                    dwg.add(dwg.polygon(points=hull_points,
+                                      fill=color_hex,
+                                      opacity=0.7,
+                                      stroke='darkgray',
+                                      stroke_width=1))
+                    
+                    # このピースに含まれるサラミを描画
+                    for cx, cy in self.centers:
+                        # サラミがこのピースに含まれるかチェック
+                        salami_points = 0
+                        for j in idx:
+                            if (self.px[j] - cx)**2 + (self.py[j] - cy)**2 <= self.R_salami**2:
+                                salami_points += 1
+                        
+                        if salami_points > 10:  # 十分な点がサラミ内にある場合
+                            # サラミの座標を変換してずらす
+                            sx = (cx + 1.2) * svg_size / 2.4 + offset_x
+                            sy = (-cy + 1.2) * svg_size / 2.4 - offset_y
+                            radius = self.R_salami * svg_size / 2.4
+                            dwg.add(dwg.circle(center=(sx, sy), r=radius,
+                                               fill='indianred', stroke='darkred', 
+                                               stroke_width=1, opacity=0.9))
+                    
+                    # ピース番号を表示
+                    # 重心を計算
+                    cx = np.mean([p[0] for p in hull_points])
+                    cy = np.mean([p[1] for p in hull_points])
+                    dwg.add(dwg.text(str(i + 1),
+                                   insert=(cx, cy),
+                                   font_size='16px',
+                                   font_family='Arial',
+                                   fill='white',
+                                   font_weight='bold',
+                                   text_anchor='middle',
+                                   dominant_baseline='middle'))
+                    
+                except:
+                    pass
+        
+        # タイトルを追加
+        dwg.add(dwg.text('Exploded Pizza View',
+                       insert=(svg_size / 2, 30),
+                       font_size='24px',
+                       font_family='Arial',
+                       fill='saddlebrown',
+                       font_weight='bold',
+                       text_anchor='middle'))
+        
+        dwg.save()
+        self._log(f"エクスプローデッドビューSVG生成完了: {output_path}")
+    
+    def create_interactive_exploded_svg(self, output_path, svg_size=800, explode_factor=0.33):
+        """
+        インタラクティブなエクスプローデッドビューSVGを生成（静的な分離表示）
+        
+        Args:
+            output_path: 出力SVGファイルパス
+            svg_size: SVGのサイズ
+            explode_factor: ずらす距離の係数
+        """
+        # SVG作成
+        dwg = svgwrite.Drawing(output_path, size=(svg_size, svg_size))
+        
+        # 背景
+        dwg.add(dwg.rect((0, 0), (svg_size, svg_size), fill='white'))
+        
+        # ピザの円を薄く描画
+        center = (svg_size / 2, svg_size / 2)
+        radius = self.R_pizza * svg_size / 2.4
+        dwg.add(dwg.circle(center=center, r=radius,
+                          fill='none', stroke='lightgray', stroke_width=1,
+                          stroke_dasharray='5,5', opacity=0.5))
+        
+        # 各ピースの中心角度を計算
+        piece_angles = []
+        for i in range(self.n):
+            idx = self.pieces[i]
+            if len(idx) > 0:
+                angles = np.arctan2(self.py[idx], self.px[idx])
+                mean_angle = np.angle(np.mean(np.exp(1j * angles)))
+                piece_angles.append(mean_angle)
+            else:
+                piece_angles.append(0)
+        
+        # 各ピースをアニメーション付きで描画
+        for i in range(self.n):
+            # グループを作成
+            piece_group = dwg.g(id=f'piece_{i+1}_group', class_='animated-piece')
+            
+            # アニメーションのための初期位置と最終位置を計算
+            angle = piece_angles[i]
+            offset_dist = self.R_pizza * explode_factor * svg_size / 2.4
+            offset_x = offset_dist * np.cos(angle)
+            offset_y = -offset_dist * np.sin(angle)  # Y軸反転
+            
+            # アニメーションを追加（アニメーションなしの静的なグループに変更）
+            # svgwriteのアニメーション機能に問題があるため、静的な変換を使用
+            piece_group['transform'] = f'translate({offset_x}, {offset_y})'
+            
+            # ピースの形状を追加（元の位置で描画）
+            idx = self.pieces[i]
+            piece_points = [(self.px[j], self.py[j]) for j in idx]
+            
+            if len(piece_points) >= 3:
+                try:
+                    hull = ConvexHull(piece_points)
+                    hull_points = [self._transform_to_svg_coords(piece_points[j][0], 
+                                                                piece_points[j][1], 
+                                                                svg_size) 
+                                  for j in hull.vertices]
+                    
+                    cmap = plt.get_cmap('tab10', self.n)
+                    color = cmap(i)
+                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
+                                                              int(color[1]*255), 
+                                                              int(color[2]*255))
+                    
+                    piece_group.add(dwg.polygon(points=hull_points,
+                                              fill=color_hex,
+                                              opacity=0.7,
+                                              stroke='darkgray',
+                                              stroke_width=1))
+                    
+                    # サラミを追加
+                    for cx, cy in self.centers:
+                        salami_points = 0
+                        for j in idx:
+                            if (self.px[j] - cx)**2 + (self.py[j] - cy)**2 <= self.R_salami**2:
+                                salami_points += 1
+                        
+                        if salami_points > 10:
+                            center = self._transform_to_svg_coords(cx, cy, svg_size)
+                            radius = self.R_salami * svg_size / 2.4
+                            piece_group.add(dwg.circle(center=center, r=radius,
+                                                     fill='indianred', stroke='darkred', 
+                                                     stroke_width=1, opacity=0.9))
+                except:
+                    pass
+            
+            dwg.add(piece_group)
+        
+        # CSSスタイルを追加
+        dwg.defs.add(dwg.style('''
+            .animated-piece {
+                cursor: pointer;
+            }
+            .animated-piece:hover {
+                opacity: 0.9;
+            }
+        '''))
+        
+        dwg.save()
+        self._log(f"インタラクティブエクスプローデッドビューSVG生成完了: {output_path}")
+    
+    def create_properly_divided_exploded_svg(self, output_path, svg_size=800, explode_factor=0.33):
+        """
+        サラミを正しく分割して、各ピースを円弧方向にずらして表示するSVGを生成
+        
+        Args:
+            output_path: 出力SVGファイルパス
+            svg_size: SVGのサイズ
+            explode_factor: ずらす距離の係数（半径に対する比率）
+        """
+        # SVG作成
+        dwg = svgwrite.Drawing(output_path, size=(svg_size, svg_size))
+        
+        # 背景
+        dwg.add(dwg.rect((0, 0), (svg_size, svg_size), fill='white'))
+        
+        # ピザの円を薄く描画（ガイドとして）
+        center = (svg_size / 2, svg_size / 2)
+        radius = self.R_pizza * svg_size / 2.4
+        dwg.add(dwg.circle(center=center, r=radius,
+                          fill='none', stroke='lightgray', stroke_width=1,
+                          stroke_dasharray='5,5', opacity=0.5))
+        
+        # 各ピースの中心角度を計算
+        piece_angles = []
+        for i in range(self.n):
+            idx = self.pieces[i]
+            if len(idx) > 0:
+                # 各点の角度を計算
+                angles = np.arctan2(self.py[idx], self.px[idx])
+                # 平均角度を計算（円を横切る場合の処理を含む）
+                mean_angle = np.angle(np.mean(np.exp(1j * angles)))
+                piece_angles.append(mean_angle)
+            else:
+                piece_angles.append(0)
+        
+        # 各ピースを描画（ずらして配置）
+        for i in range(self.n):
+            # ずらす方向と距離を計算
+            angle = piece_angles[i]
+            offset_dist = self.R_pizza * explode_factor * svg_size / 2.4
+            offset_x = offset_dist * np.cos(angle)
+            offset_y = offset_dist * np.sin(angle)
+            
+            # ピースグループを作成
+            piece_group = dwg.g(id=f'piece_{i+1}_group')
+            
+            # ピースの凸包を計算
+            idx = self.pieces[i]
+            piece_points = [(self.px[j], self.py[j]) for j in idx]
+            
+            if len(piece_points) >= 3:
+                try:
+                    hull = ConvexHull(piece_points)
+                    # 変換してずらした座標を計算
+                    hull_points = []
+                    for j in hull.vertices:
+                        x, y = piece_points[j]
+                        # SVG座標に変換
+                        tx = (x + 1.2) * svg_size / 2.4
+                        ty = (-y + 1.2) * svg_size / 2.4
+                        # ずらしを適用
+                        tx += offset_x
+                        ty -= offset_y  # Y軸は反転しているため
+                        hull_points.append((tx, ty))
+                    
+                    # クリッピングパスを定義（ずらした位置で）
+                    clip_id = f'piece_clip_exploded_{i}'
+                    clip_path = dwg.defs.add(dwg.clipPath(id=clip_id))
+                    clip_path.add(dwg.polygon(points=hull_points))
+                    
+                    # 色を取得
+                    cmap = plt.get_cmap('tab10', self.n)
+                    color = cmap(i)
+                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
+                                                              int(color[1]*255), 
+                                                              int(color[2]*255))
+                    
+                    # ピースを描画
+                    piece_group.add(dwg.polygon(points=hull_points,
+                                               fill=color_hex,
+                                               opacity=0.7,
+                                               stroke='darkgray',
+                                               stroke_width=1))
+                    
+                    # サラミグループ（クリッピング適用）
+                    salami_group = dwg.g(clip_path=f'url(#{clip_id})')
+                    
+                    # このピースに含まれるサラミを描画
+                    for cx, cy in self.centers:
+                        # サラミの円とピースの交差を計算
+                        # モンテカルロ点でサラミの重なり面積を推定
+                        overlap_points = 0
+                        for j in idx:
+                            if (self.px[j] - cx)**2 + (self.py[j] - cy)**2 <= self.R_salami**2:
+                                overlap_points += 1
+                        
+                        # 重なり面積が一定以上ならサラミを描画
+                        if overlap_points > 0:
+                            # サラミの中心をずらして描画
+                            sx = (cx + 1.2) * svg_size / 2.4 + offset_x
+                            sy = (-cy + 1.2) * svg_size / 2.4 - offset_y
+                            salami_radius = self.R_salami * svg_size / 2.4
+                            
+                            # 重なり面積に応じて透明度を調整（部分的なサラミを表現）
+                            total_salami_points = sum(1 for px, py in zip(self.px, self.py) 
+                                                    if (px - cx)**2 + (py - cy)**2 <= self.R_salami**2)
+                            overlap_ratio = overlap_points / max(total_salami_points, 1)
+                            
+                            # サラミを描画（完全に含まれる場合は通常の色、部分的な場合は薄く）
+                            if overlap_ratio > 0.8:
+                                salami_opacity = 0.9
+                                salami_fill = 'indianred'
+                            else:
+                                salami_opacity = 0.6
+                                salami_fill = 'lightcoral'
+                            
+                            salami_group.add(dwg.circle(center=(sx, sy), r=salami_radius,
+                                                       fill=salami_fill, 
+                                                       stroke='darkred', 
+                                                       stroke_width=1, 
+                                                       opacity=salami_opacity))
+                    
+                    piece_group.add(salami_group)
+                    
+                    
+                except:
+                    pass
+            
+            dwg.add(piece_group)
+        
+        
+        dwg.save()
+        self._log(f"正しく分割されたエクスプローデッドビューSVG生成完了: {output_path}")
+    
+    def generate_piece_svgs_with_proper_division(self, output_dir, svg_size=400):
+        """
+        各ピースの個別SVGを生成（サラミを正しく分割して表示）
+        
+        Args:
+            output_dir: 出力ディレクトリ
+            svg_size: SVGのサイズ
+            
+        Returns:
+            生成されたSVGファイルパスのリスト
+        """
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        svg_paths = []
+        
+        for i in range(self.n):
+            svg_path = output_dir / f"piece_{i+1}_properly_divided.svg"
+            self._generate_single_piece_svg_with_proper_division(
+                piece_index=i,
+                output_path=str(svg_path),
+                svg_size=svg_size
+            )
+            svg_paths.append(str(svg_path))
+            
+        return svg_paths
+    
+    def _generate_single_piece_svg_with_proper_division(self, piece_index, output_path, svg_size=400):
+        """
+        単一ピースのSVGを生成（サラミを正しく分割して表示）
+        
+        Args:
+            piece_index: ピースのインデックス
+            output_path: 出力パス
+            svg_size: SVGのサイズ
+        """
+        # SVG作成
+        dwg = svgwrite.Drawing(output_path, size=(svg_size, svg_size))
+        
+        # 背景を設定
+        dwg.add(dwg.rect((0, 0), (svg_size, svg_size), fill='white'))
+        
+        # このピースのモンテカルロ点
+        idx = self.pieces[piece_index]
+        piece_points = [(self.px[j], self.py[j]) for j in idx]
+        
+        if len(piece_points) == 0:
+            dwg.save()
+            return
+        
+        # ピースの重心と範囲を計算
+        cx = np.mean([p[0] for p in piece_points])
+        cy = np.mean([p[1] for p in piece_points])
+        max_dist = max(np.sqrt((p[0] - cx)**2 + (p[1] - cy)**2) for p in piece_points)
+        
+        # 座標変換（ピースを中心に配置）
+        scale = svg_size / (3 * max_dist) if max_dist > 0 else svg_size / 2.4
+        
+        def transform_point(x, y):
+            tx = (x - cx) * scale + svg_size / 2
+            ty = -(y - cy) * scale + svg_size / 2  # y軸を反転
+            return (tx, ty)
+        
+        # ピースの凸包を計算
+        if len(piece_points) > 3:
+            try:
+                hull = ConvexHull(piece_points)
+                hull_points = [transform_point(piece_points[i][0], piece_points[i][1]) 
+                            for i in hull.vertices]
+                
+                # クリッピングパスを定義
+                clip_path = dwg.defs.add(dwg.clipPath(id=f'piece_clip_{piece_index}'))
+                clip_path.add(dwg.polygon(points=hull_points))
+                
+                # 凸包を描画（ピースの背景）
+                dwg.add(dwg.polygon(points=hull_points,
+                                fill='bisque', stroke='saddlebrown', stroke_width=2))
+                
+                # サラミグループ（クリッピング適用）
+                salami_group = dwg.g(clip_path=f'url(#piece_clip_{piece_index})')
+                
+                # サラミを描画
+                for scx, scy in self.centers:
+                    # このサラミとピースの重なりを計算
+                    overlap_count = 0
+                    for j in idx:
+                        if (self.px[j] - scx)**2 + (self.py[j] - scy)**2 <= self.R_salami**2:
+                            overlap_count += 1
+                    
+                    if overlap_count > 0:
+                        # サラミ全体のモンテカルロ点数を計算
+                        total_salami_points = sum(1 for px, py in zip(self.px, self.py) 
+                                                if (px - scx)**2 + (py - scy)**2 <= self.R_salami**2)
+                        overlap_ratio = overlap_count / max(total_salami_points, 1)
+                        
+                        # サラミを描画
+                        center = transform_point(scx, scy)
+                        radius = self.R_salami * scale
+                        
+                        # 重なり具合に応じて描画スタイルを変更
+                        if overlap_ratio > 0.8:  # ほぼ完全に含まれる
+                            salami_group.add(dwg.circle(center=center, r=radius,
+                                                      fill='indianred', 
+                                                      stroke='darkred', 
+                                                      stroke_width=1.5, 
+                                                      opacity=0.9))
+                        elif overlap_ratio > 0.2:  # 部分的に含まれる
+                            salami_group.add(dwg.circle(center=center, r=radius,
+                                                      fill='lightcoral', 
+                                                      stroke='darkred', 
+                                                      stroke_width=1.5, 
+                                                      opacity=0.7))
+                        else:  # わずかに含まれる
+                            salami_group.add(dwg.circle(center=center, r=radius,
+                                                      fill='mistyrose', 
+                                                      stroke='darkred', 
+                                                      stroke_width=1, 
+                                                      stroke_dasharray='2,2',
+                                                      opacity=0.5))
+                
+                dwg.add(salami_group)
+                
+                # ピース情報を表示
+                info_y = 20
+                dwg.add(dwg.text(f'Piece {piece_index + 1}',
+                               insert=(10, info_y),
+                               font_size='18px',
+                               font_family='Arial',
+                               fill='saddlebrown',
+                               font_weight='bold'))
+                
+                # 面積情報
+                area = len(idx) * self.w
+                salami_area = self.on_salami[idx].sum() * self.w
+                
+                info_y += 25
+                dwg.add(dwg.text(f'Pizza area: {area:.3f}',
+                               insert=(10, info_y),
+                               font_size='14px',
+                               font_family='Arial',
+                               fill='black'))
+                
+                info_y += 20
+                dwg.add(dwg.text(f'Salami area: {salami_area:.3f}',
+                               insert=(10, info_y),
+                               font_size='14px',
+                               font_family='Arial',
+                               fill='black'))
+                
+            except:
+                pass
+        
+        dwg.save()
+    
+    def create_animated_exploding_pizza_svg(self, output_path, n_pieces=None, svg_size=800, 
+                                           explode_distance=0.4, animation_duration=3.0):
+        """
+        ピースが外側に動くアニメーションを持つSVGを生成（既存の分割を使用）
+        
+        Args:
+            output_path: 出力SVGファイルパス
+            n_pieces: 分割数（Noneの場合は既存の分割を使用）
+            svg_size: SVGのサイズ
+            explode_distance: 爆発距離（半径に対する比率）
+            animation_duration: アニメーション時間（秒）
+        """
+        # n_piecesが指定された場合のみ再分割
+        original_n = None
+        if n_pieces is not None and n_pieces != self.n:
+            # 一時的に分割数を変更してピザを再分割
+            original_n = self.n
+            self.n = n_pieces
+            
+            # 再分割処理
+            self.generate_monte_carlo_points()
+            self.place_salami_random()
+            self.calculate_targets()
+            self.divide_pizza()
+        
+        # SVG作成
+        dwg = svgwrite.Drawing(output_path, size=(svg_size, svg_size))
+        dwg['viewBox'] = f'0 0 {svg_size} {svg_size}'
+        
+        # 背景
+        dwg.add(dwg.rect((0, 0), (svg_size, svg_size), fill='white'))
+        
+        # ピザの円を薄く描画（ガイドとして）
+        center = (svg_size / 2, svg_size / 2)
+        radius = self.R_pizza * svg_size / 2.4
+        dwg.add(dwg.circle(center=center, r=radius,
+                          fill='none', stroke='lightgray', stroke_width=1,
+                          stroke_dasharray='5,5', opacity=0.3))
+        
+        # 各ピースの中心角度を計算
+        piece_angles = []
+        for i in range(self.n):
+            idx = self.pieces[i]
+            if len(idx) > 0:
+                angles = np.arctan2(self.py[idx], self.px[idx])
+                mean_angle = np.angle(np.mean(np.exp(1j * angles)))
+                piece_angles.append(mean_angle)
+            else:
+                piece_angles.append(i * 2 * np.pi / self.n)
+        
+        # 各ピースをアニメーション付きで描画
+        for i in range(self.n):
+            # ピースグループを作成
+            piece_group = dwg.g(id=f'animated_piece_{i+1}')
+            
+            # アニメーションの移動距離を計算
+            angle = piece_angles[i]
+            offset_dist = self.R_pizza * explode_distance * svg_size / 2.4
+            offset_x = offset_dist * np.cos(angle)
+            offset_y = -offset_dist * np.sin(angle)  # Y軸反転
+            
+            # ピースの凸包を計算
+            idx = self.pieces[i]
+            piece_points = [(self.px[j], self.py[j]) for j in idx]
+            
+            if len(piece_points) >= 3:
+                try:
+                    hull = ConvexHull(piece_points)
+                    # 元の位置での座標を計算
+                    hull_points = []
+                    for j in hull.vertices:
+                        x, y = piece_points[j]
+                        tx = (x + 1.2) * svg_size / 2.4
+                        ty = (-y + 1.2) * svg_size / 2.4
+                        hull_points.append((tx, ty))
+                    
+                    # クリッピングパスを定義
+                    clip_id = f'piece_clip_anim_{i}'
+                    clip_path = dwg.defs.add(dwg.clipPath(id=clip_id))
+                    
+                    # アニメーション付きクリッピングパス
+                    clip_polygon = clip_path.add(dwg.polygon(points=hull_points))
+                    
+                    # 色を取得
+                    cmap = plt.get_cmap('tab10', self.n)
+                    color = cmap(i)
+                    color_hex = '#{:02x}{:02x}{:02x}'.format(int(color[0]*255), 
+                                                              int(color[1]*255), 
+                                                              int(color[2]*255))
+                    
+                    # ピースの背景を描画
+                    piece_polygon = piece_group.add(dwg.polygon(points=hull_points,
+                                                               fill=color_hex,
+                                                               opacity=0.8,
+                                                               stroke='darkgray',
+                                                               stroke_width=1))
+                    
+                    # サラミグループ（クリッピング適用）
+                    salami_group = piece_group.add(dwg.g(clip_path=f'url(#{clip_id})'))
+                    
+                    # サラミを描画
+                    for cx, cy in self.centers:
+                        # このピースに含まれるサラミをチェック
+                        overlap_points = 0
+                        for j in idx:
+                            if (self.px[j] - cx)**2 + (self.py[j] - cy)**2 <= self.R_salami**2:
+                                overlap_points += 1
+                        
+                        if overlap_points > 0:
+                            sx = (cx + 1.2) * svg_size / 2.4
+                            sy = (-cy + 1.2) * svg_size / 2.4
+                            salami_radius = self.R_salami * svg_size / 2.4
+                            
+                            # 重なり面積を計算
+                            total_salami_points = sum(1 for px, py in zip(self.px, self.py) 
+                                                    if (px - cx)**2 + (py - cy)**2 <= self.R_salami**2)
+                            overlap_ratio = overlap_points / max(total_salami_points, 1)
+                            
+                            if overlap_ratio > 0.2:  # 20%以上重なる場合のみ描画
+                                salami_opacity = 0.9 if overlap_ratio > 0.8 else 0.7
+                                salami_group.add(dwg.circle(center=(sx, sy), r=salami_radius,
+                                                          fill='indianred', 
+                                                          stroke='darkred', 
+                                                          stroke_width=1, 
+                                                          opacity=salami_opacity))
+                    
+                    
+                except Exception as e:
+                    self._log(f"ピース{i+1}の描画でエラー: {e}")
+            
+            dwg.add(piece_group)
+        
+        # グローバルCSSスタイルを追加
+        style_rules = []
+        for i in range(self.n):
+            angle = piece_angles[i]
+            offset_x = self.R_pizza * explode_distance * svg_size / 2.4 * np.cos(angle)
+            offset_y = -self.R_pizza * explode_distance * svg_size / 2.4 * np.sin(angle)
+            
+            # 各ピースのアニメーションを定義（離れた位置で停止）
+            # IDとアニメーション名を一致させる（両方とも1から始まる）
+            style_rules.append(f'''
+        @keyframes explode_piece_{i+1} {{
+            0% {{
+                transform: translate(0, 0);
+                opacity: 0.8;
+            }}
+            100% {{
+                transform: translate({offset_x}px, {offset_y}px);
+                opacity: 1;
+            }}
+        }}
+        
+        #animated_piece_{i+1} {{
+            animation: explode_piece_{i+1} {animation_duration}s ease-out forwards;
+            animation-delay: {i * 0.2}s;
+            transform-origin: center;
+        }}''')
+        
+        global_style = '\n'.join(style_rules) + '''
+        
+        /* ホバー時の効果 */
+        g[id^="animated_piece_"] {
+            transition: filter 0.3s ease;
+        }
+        
+        g[id^="animated_piece_"]:hover {
+            filter: brightness(1.2) drop-shadow(0 0 10px rgba(0,0,0,0.3));
+            cursor: pointer;
+        }
+        '''
+        
+        # スタイルを追加
+        style_elem = dwg.style(global_style)
+        dwg.defs.add(style_elem)
+        
+        
+        # 元の分割数に戻す（再分割した場合のみ）
+        if original_n is not None:
+            self.n = original_n
+        
+        dwg.save()
+        self._log(f"アニメーション付きピザ爆発SVG生成完了: {output_path}")
 
     def run(self):
             """分割処理を実行"""
