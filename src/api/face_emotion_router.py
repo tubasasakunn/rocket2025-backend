@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 import sys
 import os
 import logging
+import base64
 from typing import Dict, Any, Union, List, Optional
 
 # サービスのインポート
@@ -45,6 +46,7 @@ async def face_emotion(
       - dominant: 最も強い感情
       - scores: 各感情のスコア
       - pay: 支払い確率（0-1の範囲、全顔の合計が1になる）
+      - face: Base64エンコードされた顔画像（data URI形式）
     - file: アップロードされたファイル名
     """
     try:
@@ -76,12 +78,17 @@ async def face_emotion(
                 # プレースホルダーの場合
                 results.append({
                     "dominant": None,
-                    "scores": {}
+                    "scores": {},
+                    "face": None
                 })
                 pay_raws.append(None)
                 missing_count += 1
             else:
                 # 通常の顔画像の場合
+                # Base64エンコードした顔画像を作成
+                face_base64 = base64.b64encode(face_bytes).decode('utf-8')
+                face_data_uri = f"data:image/jpeg;base64,{face_base64}"
+                
                 # 感情認識を実行
                 try:
                     emotion_result = emotion_service.analyze(face_bytes)
@@ -92,7 +99,8 @@ async def face_emotion(
                     # 結果を追加
                     results.append({
                         "dominant": emotion_result["dominant"],
-                        "scores": emotion_result["scores"]
+                        "scores": emotion_result["scores"],
+                        "face": face_data_uri
                     })
                     pay_raws.append(pay_raw)
                 except Exception as e:
@@ -100,7 +108,8 @@ async def face_emotion(
                     # 感情認識に失敗した場合は null を設定
                     results.append({
                         "dominant": None,
-                        "scores": {}
+                        "scores": {},
+                        "face": face_data_uri  # 顔画像は含める
                     })
                     pay_raws.append(None)
                     missing_count += 1
