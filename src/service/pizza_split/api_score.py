@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 import shutil
 
-from score_multi import MultiImageScoreCalculator
+from src.service.pizza_split.score_multi import MultiImageScoreCalculator
 
 
 # 定数定義
