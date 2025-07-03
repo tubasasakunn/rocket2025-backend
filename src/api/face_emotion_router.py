@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, File, UploadFile, Form
 from fastapi.responses import JSONResponse
 import sys
 import os
-import base64
+import logging
 from typing import Dict, Any, Union, List, Optional
 from pydantic import BaseModel, Field
 
@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from service.face_find.service import FaceFindService
 from service.emotion_recognition.service import EmotionRecognitionService, EMOTION_PAY_WEIGHTS
+from utils.binary import safe_b64decode, safe_b64encode, format_image_data_uri
+
+# ロガーの設定
+logger = logging.getLogger("app.api.face_emotion_router")
 
 # ルーターの作成
 router = APIRouter(tags=["face-emotion"])
@@ -106,19 +110,26 @@ async def face_emotion(request: FaceFindRequest):
                 results.append({
                     "image": image_part,
                     "dominant": None,
-                    "scores": None
+                    "scores": {}
                 })
                 pay_raws.append(None)
                 missing_count += 1
             else:
                 # 通常の顔画像の場合
-                # Base64から画像バイナリに変換
-                if 'base64,' in face_b64:
-                    face_data = face_b64.split('base64,')[1]
-                else:
-                    face_data = face_b64
+                # 安全なBase64デコード処理を使用
+                face_bytes, success = safe_b64decode(face_b64)
                 
-                face_bytes = base64.b64decode(face_data)
+                if not success or face_bytes is None:
+                    # デコードに失敗した場合のエラーハンドリング
+                    logger.warning(f"顔画像のBase64デコードに失敗しました")
+                    results.append({
+                        "image": face_b64,
+                        "dominant": None,
+                        "scores": {}
+                    })
+                    pay_raws.append(None)
+                    missing_count += 1
+                    continue
                 
                 # 感情認識を実行
                 try:
@@ -135,6 +146,7 @@ async def face_emotion(request: FaceFindRequest):
                     })
                     pay_raws.append(pay_raw)
                 except Exception as e:
+                    logger.error(f"感情認識エラー: {str(e)}")
                     # 感情認識に失敗した場合は null を設定
                     results.append({
                         "image": face_b64,
@@ -152,7 +164,7 @@ async def face_emotion(request: FaceFindRequest):
             if pay_raw is not None:
                 # 感情認識に成功した顔
                 if sum_raw > 0:
-                    results[i]["pay"] = pay_raw / (sum_raw + missing_count)
+                    results[i]["pay"] = float(pay_raw / (sum_raw + missing_count))
                 else:
                     # すべての顔の支払い確率の原値が0の場合は均等に分配
                     results[i]["pay"] = 1.0 / len(pay_raws)
@@ -174,9 +186,11 @@ async def face_emotion(request: FaceFindRequest):
         return JSONResponse(content=response)
         
     except ValueError as e:
+        logger.error(f"入力値エラー: {str(e)}")
         # 顔検出に関するエラー
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"予期しないエラー: {str(e)}")
         # その他のエラー
         raise HTTPException(status_code=500, detail=f"処理エラー: {str(e)}")
 
@@ -251,8 +265,21 @@ async def face_emotion_form(
                 detail="空のファイルが送信されました"
             )
         
-        # Base64エンコード
-        image_b64 = f"data:image/jpeg;base64,{base64.b64encode(contents).decode('utf-8')}"
+        # Base64エンコード（安全な関数を使用）
+        encoded_data, success = safe_b64encode(contents)
+        if not success:
+            raise HTTPException(
+                status_code=400,
+                detail="画像データのBase64エンコードに失敗しました"
+            )
+        
+        # データURIフォーマットに変換
+        image_b64 = format_image_data_uri(contents)
+        if image_b64 is None:
+            raise HTTPException(
+                status_code=400,
+                detail="画像データのフォーマットに失敗しました"
+            )
         
         # 顔検出を実行
         face_result = face_find_service.analyze(image_b64, count)
@@ -272,19 +299,26 @@ async def face_emotion_form(
                 results.append({
                     "image": image_part,
                     "dominant": None,
-                    "scores": None
+                    "scores": {}
                 })
                 pay_raws.append(None)
                 missing_count += 1
             else:
                 # 通常の顔画像の場合
-                # Base64から画像バイナリに変換
-                if 'base64,' in face_b64:
-                    face_data = face_b64.split('base64,')[1]
-                else:
-                    face_data = face_b64
+                # 安全なBase64デコード処理を使用
+                face_bytes, success = safe_b64decode(face_b64)
                 
-                face_bytes = base64.b64decode(face_data)
+                if not success or face_bytes is None:
+                    # デコードに失敗した場合のエラーハンドリング
+                    logger.warning(f"顔画像のBase64デコードに失敗しました")
+                    results.append({
+                        "image": face_b64,
+                        "dominant": None,
+                        "scores": {}
+                    })
+                    pay_raws.append(None)
+                    missing_count += 1
+                    continue
                 
                 # 感情認識を実行
                 try:
@@ -301,6 +335,7 @@ async def face_emotion_form(
                     })
                     pay_raws.append(pay_raw)
                 except Exception as e:
+                    logger.error(f"感情認識エラー: {str(e)}")
                     # 感情認識に失敗した場合は null を設定
                     results.append({
                         "image": face_b64,
@@ -318,7 +353,7 @@ async def face_emotion_form(
             if pay_raw is not None:
                 # 感情認識に成功した顔
                 if sum_raw > 0:
-                    results[i]["pay"] = pay_raw / (sum_raw + missing_count)
+                    results[i]["pay"] = float(pay_raw / (sum_raw + missing_count))
                 else:
                     # すべての顔の支払い確率の原値が0の場合は均等に分配
                     results[i]["pay"] = 1.0 / len(pay_raws)
@@ -340,8 +375,10 @@ async def face_emotion_form(
         return JSONResponse(content=response)
         
     except ValueError as e:
+        logger.error(f"入力値エラー: {str(e)}")
         # 顔検出に関するエラー
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"予期しないエラー: {str(e)}")
         # その他のエラー
         raise HTTPException(status_code=500, detail=f"処理エラー: {str(e)}")
