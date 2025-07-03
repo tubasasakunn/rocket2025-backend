@@ -19,6 +19,7 @@ scipy==1.10.1
 # Computer Vision and ML
 ultralytics==8.0.223
 opencv-python-headless==4.8.1.78
+
 torch==2.0.0
 
 # TensorFlow - specified separately to avoid dependency conflicts
