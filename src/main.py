@@ -61,7 +61,7 @@ app.add_middleware(BinaryDataHandlingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 本番環境では適切に制限すること
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
