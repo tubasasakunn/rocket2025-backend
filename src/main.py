@@ -19,6 +19,7 @@ try:
     from src.api.user_record_router import router as user_record_router
     from src.api.pizza_score_router import router as pizza_score_router
     from src.api.emotion_recognition_router import router as emotion_recognition_router
+    from src.api.face_find_router import router as face_find_router
 except ImportError:
     # ローカル環境での相対インポート
     from api.pizza_cutter_router import router as pizza_cutter_router
@@ -26,6 +27,7 @@ except ImportError:
     from api.user_record_router import router as user_record_router
     from api.pizza_score_router import router as pizza_score_router
     from api.emotion_recognition_router import router as emotion_recognition_router
+    from api.face_find_router import router as face_find_router
 
 
 # FastAPI アプリケーションの作成
@@ -50,6 +52,7 @@ app.include_router(calculate_ideal_cut_router, prefix="/api")
 app.include_router(user_record_router, prefix="/api")
 app.include_router(pizza_score_router, prefix="/api")
 app.include_router(emotion_recognition_router, prefix="/api")
+app.include_router(face_find_router, prefix="/api")
 
 
 # ルートエンドポイント
