@@ -1,6 +1,6 @@
 このrepoではピザをサラミなどの具単位で完全に平等に切り分けるwebアプリのバックエンドを開発しています。
+詳細はreadmeに載っています。pythonのversionは3.11を使用しています。
 apiにエンドポイントを書いています。
-
 webアプリのバックエンドは、PythonのFastAPIで開発しています。
 frontendが叩くAPIエンドポイントをapiに定義しています。
 DBはgoogle app scriptで作っています。コードはgasに書いています。
