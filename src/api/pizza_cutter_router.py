@@ -7,6 +7,12 @@ import uuid
 from pathlib import Path
 import shutil
 import numpy as np
+import cv2
+import base64
+from PIL import Image, ImageDraw
+import io
+import xml.etree.ElementTree as ET
+import re
 
 from service.pizza_split.pizza_segmentation_service import PizzaSegmentationService
 from service.pizza_split.pizza_circle_detection_service import PizzaCircleDetectionService
@@ -34,6 +40,7 @@ class PizzaDivisionResponse(BaseModel):
     svg_after_explosion: Optional[str] = None   # 爆発後のSVG
     svg_animated: Optional[str] = None          # アニメーション付きSVG
     piece_svgs: List[str] = []                  # 各ピースの個別SVG（色付き）
+    overlay_image: Optional[str] = None         # 元画像にオーバーレイしたPNG画像（base64）
     error_message: Optional[str] = None
 
 
@@ -78,6 +85,377 @@ def get_salami_circle_detection_service() -> SalamiCircleDetectionService:
 
 def get_preprocess_service() -> PreprocessService:
     return PreprocessService()
+
+
+def parse_svg_elements(svg_content: str) -> dict:
+    """
+    SVGコンテンツから描画要素を抽出
+    
+    Args:
+        svg_content: SVGコンテンツ文字列
+        
+    Returns:
+        dict: 描画要素の辞書
+    """
+    elements = {
+        'circles': [],
+        'lines': [],
+        'polygons': []
+    }
+    
+    try:
+        # SVGのXMLを解析
+        root = ET.fromstring(svg_content)
+        
+        # 名前空間を除去してタグ名のみ取得
+        for elem in root.iter():
+            tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+            
+            if tag == 'circle':
+                try:
+                    cx = float(elem.get('cx', 0))
+                    cy = float(elem.get('cy', 0))
+                    r = float(elem.get('r', 0))
+                    stroke = elem.get('stroke', 'black')
+                    stroke_width = float(elem.get('stroke-width', 1))
+                    fill = elem.get('fill', 'none')
+                    elements['circles'].append({
+                        'cx': cx, 'cy': cy, 'r': r, 
+                        'stroke': stroke, 'stroke_width': stroke_width, 'fill': fill
+                    })
+                except (ValueError, TypeError):
+                    continue
+                    
+            elif tag == 'line':
+                try:
+                    x1 = float(elem.get('x1', 0))
+                    y1 = float(elem.get('y1', 0))
+                    x2 = float(elem.get('x2', 0))
+                    y2 = float(elem.get('y2', 0))
+                    stroke = elem.get('stroke', 'black')
+                    stroke_width = float(elem.get('stroke-width', 1))
+                    elements['lines'].append({
+                        'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2,
+                        'stroke': stroke, 'stroke_width': stroke_width
+                    })
+                except (ValueError, TypeError):
+                    continue
+                    
+            elif tag == 'polygon':
+                try:
+                    points_str = elem.get('points', '')
+                    if points_str:
+                        points = []
+                        coords = points_str.replace(',', ' ').split()
+                        for i in range(0, len(coords), 2):
+                            if i + 1 < len(coords):
+                                points.append((float(coords[i]), float(coords[i+1])))
+                        
+                        stroke = elem.get('stroke', 'black')
+                        stroke_width = float(elem.get('stroke-width', 1))
+                        fill = elem.get('fill', 'none')
+                        elements['polygons'].append({
+                            'points': points, 'stroke': stroke, 
+                            'stroke_width': stroke_width, 'fill': fill
+                        })
+                except (ValueError, TypeError):
+                    continue
+    except Exception as e:
+        print(f"SVG解析エラー: {e}")
+    
+    return elements
+
+
+def color_name_to_rgb(color_name: str) -> tuple:
+    """色名をRGB値に変換"""
+    color_map = {
+        'black': (0, 0, 0),
+        'brown': (165, 42, 42),
+        'darkred': (139, 0, 0),
+        'indianred': (205, 92, 92),
+        'darkgray': (169, 169, 169),
+        'gray': (128, 128, 128),
+        'bisque': (255, 228, 196),
+        'saddlebrown': (139, 69, 19),
+        'none': None
+    }
+    return color_map.get(color_name.lower(), (0, 0, 0))
+
+
+def create_svg_overlay_base64(original_image_path: str, svg_content: str) -> str:
+    """
+    元画像にSVGをMatplotlibでレンダリングして重ねてbase64エンコードされたPNG画像を生成
+    
+    Args:
+        original_image_path: 元画像のパス
+        svg_content: オーバーレイするSVGコンテンツ
+        
+    Returns:
+        base64エンコードされたPNG画像文字列
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib.image as mpimg
+        from matplotlib.patches import Polygon, Circle
+        import xml.etree.ElementTree as ET
+        
+        # 元画像を読み込み
+        original_img = cv2.imread(original_image_path)
+        if original_img is None:
+            raise ValueError(f"画像を読み込めません: {original_image_path}")
+        
+        height, width = original_img.shape[:2]
+        original_img_rgb = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
+        
+        # Matplotlibで図を作成
+        fig, ax = plt.subplots(figsize=(width/100, height/100), dpi=100)
+        ax.set_xlim(0, width)
+        ax.set_ylim(height, 0)  # Y軸を反転（画像座標系に合わせる）
+        ax.set_aspect('equal')
+        ax.axis('off')
+        
+        # 背景画像を表示
+        ax.imshow(original_img_rgb, extent=[0, width, height, 0])
+        
+        # SVGをパースしてMatplotlibで描画
+        try:
+            root = ET.fromstring(svg_content)
+            
+            # 全ての要素を処理
+            for elem in root.iter():
+                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                
+                if tag == 'polygon':
+                    points_str = elem.get('points', '')
+                    if points_str:
+                        # 座標をパース
+                        coords = points_str.replace(',', ' ').split()
+                        points = []
+                        for i in range(0, len(coords), 2):
+                            if i + 1 < len(coords):
+                                points.append([float(coords[i]), float(coords[i+1])])
+                        
+                        if len(points) >= 3:
+                            fill = elem.get('fill', 'none')
+                            stroke = elem.get('stroke', 'black')
+                            stroke_width = float(elem.get('stroke-width', 1))
+                            opacity = float(elem.get('opacity', 1.0))
+                            
+                            # 透明度を上げる（より薄く）
+                            alpha = opacity * 0.8  # 元の透明度の30%
+                            
+                            # Matplotlibのポリゴンを追加
+                            polygon = Polygon(points, 
+                                            facecolor=fill if fill != 'none' else 'none',
+                                            edgecolor=stroke,
+                                            linewidth=stroke_width,
+                                            alpha=alpha)
+                            ax.add_patch(polygon)
+                
+                elif tag == 'circle':
+                    # サラミ（円）は表示しない
+                    pass
+        
+        except Exception as e:
+            print(f"SVG解析エラー: {e}")
+        
+        # 図をメモリに保存
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='png', bbox_inches='tight', 
+                   pad_inches=0, dpi=100, facecolor='white')
+        plt.close(fig)  # メモリリークを防ぐ
+        
+        img_buffer.seek(0)
+        
+        # base64エンコード
+        base64_str = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
+        return f"data:image/png;base64,{base64_str}"
+        
+    except Exception as e:
+        print(f"Matplotlibオーバーレイ画像生成エラー: {e}")
+        # エラー時は元画像をそのままbase64エンコードして返す
+        try:
+            with open(original_image_path, 'rb') as img_file:
+                base64_str = base64.b64encode(img_file.read()).decode('utf-8')
+                return f"data:image/png;base64,{base64_str}"
+        except:
+            return ""
+
+
+def create_overlay_png_base64(original_image_path: str, svg_content: str) -> str:
+    """
+    元画像にSVGをオーバーレイしてbase64エンコードされたPNG画像を生成
+    
+    Args:
+        original_image_path: 元画像のパス
+        svg_content: オーバーレイするSVGコンテンツ
+        
+    Returns:
+        base64エンコードされたPNG画像文字列
+    """
+    try:
+        # 元画像を読み込み
+        original_img = cv2.imread(original_image_path)
+        if original_img is None:
+            raise ValueError(f"画像を読み込めません: {original_image_path}")
+        
+        height, width = original_img.shape[:2]
+        
+        # OpenCVからPILに変換（BGR→RGB）
+        original_img_rgb = cv2.cvtColor(original_img, cv2.COLOR_BGR2RGB)
+        
+        # 元画像をHTMLに埋め込むためのbase64エンコード
+        _, img_buffer = cv2.imencode('.png', original_img)
+        img_base64 = base64.b64encode(img_buffer).decode('utf-8')
+        
+        # SVGに元画像を背景として埋め込む
+        svg_with_background = f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" 
+     width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <!-- 背景画像 -->
+  <image x="0" y="0" width="{width}" height="{height}" 
+         xlink:href="data:image/png;base64,{img_base64}"/>
+  
+  <!-- オーバーレイ要素 -->
+  {extract_svg_body(svg_content)}
+</svg>'''
+        
+        # wkhtmltoimageやpuppeteerの代わりに、SVGをHTMLとしてレンダリング
+        try:
+            # SVGを直接PIL/Pillowで処理できる形に変換
+            from PIL import ImageDraw
+            import re
+            
+            pil_img = Image.fromarray(original_img_rgb).convert('RGBA')
+            overlay = Image.new('RGBA', (width, height), (255, 255, 255, 0))
+            draw = ImageDraw.Draw(overlay)
+            
+            # 簡単なSVG要素の抽出と描画
+            draw_simple_svg_elements(draw, svg_content)
+            
+            # オーバーレイ合成
+            combined = Image.alpha_composite(pil_img, overlay)
+            
+        except Exception as e:
+            print(f"SVG描画エラー、元画像のみ返却: {e}")
+            combined = Image.fromarray(original_img_rgb)
+        
+        # PNGとして保存してbase64エンコード
+        img_buffer = io.BytesIO()
+        combined.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        
+        # base64エンコード
+        base64_str = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
+        return f"data:image/png;base64,{base64_str}"
+        
+    except Exception as e:
+        print(f"オーバーレイ画像生成エラー: {e}")
+        # エラー時は元画像をそのままbase64エンコードして返す
+        try:
+            with open(original_image_path, 'rb') as img_file:
+                base64_str = base64.b64encode(img_file.read()).decode('utf-8')
+                return f"data:image/png;base64,{base64_str}"
+        except:
+            return ""
+
+
+def extract_svg_body(svg_content: str) -> str:
+    """SVGコンテンツから<svg>タグの中身を抽出"""
+    try:
+        # <svg>タグの開始と終了を見つける
+        start_match = re.search(r'<svg[^>]*>', svg_content)
+        end_match = re.search(r'</svg>', svg_content)
+        
+        if start_match and end_match:
+            start = start_match.end()
+            end = end_match.start()
+            return svg_content[start:end]
+        else:
+            return svg_content
+    except:
+        return svg_content
+
+
+def draw_simple_svg_elements(draw, svg_content: str):
+    """シンプルなSVG要素を描画"""
+    import re
+    
+    # ポリゴンの描画（ピザピース）
+    polygon_pattern = r'<polygon[^>]*points="([^"]*)"[^>]*(?:stroke="([^"]*)")?[^>]*(?:stroke-width="([^"]*)")?[^>]*(?:fill="([^"]*)")?[^>]*/?>'
+    for match in re.finditer(polygon_pattern, svg_content):
+        try:
+            points_str = match.group(1)
+            stroke = match.group(2) or 'black'
+            stroke_width = int(float(match.group(3) or 2))
+            fill = match.group(4) or 'none'
+            
+            # 座標をパース
+            coords = points_str.replace(',', ' ').split()
+            points = []
+            for i in range(0, len(coords), 2):
+                if i + 1 < len(coords):
+                    points.append((float(coords[i]), float(coords[i+1])))
+            
+            if len(points) >= 3:
+                # 塗りつぶし
+                if fill and fill != 'none':
+                    fill_color = color_name_to_rgb(fill)
+                    if fill_color:
+                        fill_rgba = fill_color + (100,)  # より薄い半透明
+                        draw.polygon(points, fill=fill_rgba)
+                
+                # 輪郭
+                stroke_color = color_name_to_rgb(stroke)
+                if stroke_color and stroke_width > 0:
+                    stroke_rgba = stroke_color + (255,)
+                    draw.polygon(points, outline=stroke_rgba, width=stroke_width)
+        except Exception as e:
+            print(f"Polygon描画エラー: {e}")
+            continue
+    
+    # 円の描画（サラミ）
+    circle_pattern = r'<circle[^>]*cx="([^"]*)"[^>]*cy="([^"]*)"[^>]*r="([^"]*)"[^>]*(?:stroke="([^"]*)")?[^>]*(?:stroke-width="([^"]*)")?[^>]*(?:fill="([^"]*)")?[^>]*/?>'
+    for match in re.finditer(circle_pattern, svg_content):
+        try:
+            cx, cy, r = float(match.group(1)), float(match.group(2)), float(match.group(3))
+            stroke = match.group(4) or 'darkred'
+            stroke_width = int(float(match.group(5) or 2))
+            fill = match.group(6) or 'indianred'
+            
+            bbox = [cx - r, cy - r, cx + r, cy + r]
+            
+            # 塗りつぶし
+            if fill and fill != 'none':
+                fill_color = color_name_to_rgb(fill)
+                if fill_color:
+                    fill_rgba = fill_color + (180,)  # サラミは少し濃く
+                    draw.ellipse(bbox, fill=fill_rgba)
+            
+            # 輪郭
+            stroke_color = color_name_to_rgb(stroke)
+            if stroke_color and stroke_width > 0:
+                stroke_rgba = stroke_color + (255,)
+                draw.ellipse(bbox, outline=stroke_rgba, width=stroke_width)
+        except Exception as e:
+            print(f"Circle描画エラー: {e}")
+            continue
+    
+    # 線の描画
+    line_pattern = r'<line[^>]*x1="([^"]*)"[^>]*y1="([^"]*)"[^>]*x2="([^"]*)"[^>]*y2="([^"]*)"[^>]*(?:stroke="([^"]*)")?[^>]*(?:stroke-width="([^"]*)")?[^>]*/?>'
+    for match in re.finditer(line_pattern, svg_content):
+        try:
+            x1, y1, x2, y2 = float(match.group(1)), float(match.group(2)), float(match.group(3)), float(match.group(4))
+            stroke = match.group(5) or 'black'
+            stroke_width = int(float(match.group(6) or 2))
+            
+            stroke_color = color_name_to_rgb(stroke)
+            if stroke_color and stroke_width > 0:
+                stroke_rgba = stroke_color + (255,)
+                draw.line([(x1, y1), (x2, y2)], fill=stroke_rgba, width=stroke_width)
+        except Exception as e:
+            print(f"Line描画エラー: {e}")
+            continue
 
 
 # エンドポイント定義
@@ -144,6 +522,7 @@ async def divide_pizza(
     3. サラミの検出と個別円検出
     4. 移動ナイフ法による分割
     5. 全体SVGと各ピースのSVGを生成
+    6. 元画像にオーバーレイしたPNG画像を生成（base64エンコード）
     """
     
     # ファイル形式チェック
@@ -191,8 +570,10 @@ async def divide_pizza(
             if animated_path.exists():
                 svg_animated = animated_path.read_text()
         
-        # 各ピースの色付きSVGを生成
+        # 各ピースの色付きSVGとオーバーレイ画像を生成
         piece_svgs = []
+        overlay_image = None
+        
         if 'cut_edges' in result and 'pieces' in result:
             from service.pizza_split.salami_devide import PizzaDivider
             
@@ -231,13 +612,22 @@ async def divide_pizza(
             
             # 色付きピースSVGを生成
             piece_svgs = divider.generate_colored_piece_svgs(svg_size=400)
+            
+            # オーバーレイ画像を生成（爆発前のSVGを使用）
+            if svg_before:
+                try:
+                    overlay_image = create_svg_overlay_base64(str(upload_path), svg_before)
+                except Exception as e:
+                    print(f"オーバーレイ画像生成エラー: {e}")
+                    overlay_image = None
         
         return PizzaDivisionResponse(
             success=True,
             svg_before_explosion=svg_before,
             svg_after_explosion=svg_after,
             svg_animated=svg_animated,
-            piece_svgs=piece_svgs
+            piece_svgs=piece_svgs,
+            overlay_image=overlay_image
         )
     
     except Exception as e:
@@ -460,13 +850,7 @@ async def calculate_pizza_score(
         pizza_mask = pizza_service.segment_pizza(str(upload_path), isDebug=False)
         
         # 2. サラミセグメンテーション
-        salami_result = salami_service.segment_salami(
-            str(upload_path),
-            pizza_mask=pizza_mask,
-            debug_output_dir=None,
-            base_name=upload_path.stem,
-            isDebug=False
-        )
+        salami_result = salami_service.segment_salami(str(upload_path))
         
         if isinstance(salami_result, tuple):
             salami_mask, _ = salami_result

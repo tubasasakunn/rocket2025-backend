@@ -65,3 +65,6 @@ test_svg_output/
 animated_pizza_output/
 *.svg
 *.json
+
+pizza_overlay.png
+debug/

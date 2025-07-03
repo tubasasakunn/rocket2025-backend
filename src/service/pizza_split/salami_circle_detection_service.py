@@ -119,18 +119,18 @@ class SalamiCircleDetectionService:
         """
         circles = []
         
-        # 最大距離の80%以上の領域を抽出
-        threshold = max_dist * 0.8
+        # 最大距離の95%以上の領域を抽出（より保守的な分割）
+        threshold = max_dist * 0.95
         high_dist_mask = (dist_transform >= threshold).astype(np.uint8) * 255
         
         if isDebug:
-            print(f"[DEBUG] 80%閾値: {threshold:.2f}")
+            print(f"[DEBUG] 95%閾値: {threshold:.2f}")
         
-        # 連結成分を検出（80%領域での分割判定）
+        # 連結成分を検出（95%領域での分割判定）
         num_sub_labels, sub_labels = cv2.connectedComponents(high_dist_mask)
         
         if isDebug:
-            print(f"[DEBUG] 80%領域で{num_sub_labels - 1}個のサブ領域を検出")
+            print(f"[DEBUG] 95%領域で{num_sub_labels - 1}個のサブ領域を検出")
         
         if num_sub_labels <= 1:
             # 分割されなかった場合（背景のみ、または縮小で消えた場合）
@@ -148,7 +148,7 @@ class SalamiCircleDetectionService:
                 print(f"[DEBUG] {num_sub_labels - 1}個のサブ領域を個別に処理")
             
             for sub_label in range(1, num_sub_labels):
-                # 80%領域の各部分に対応する元のマスク領域を抽出
+                # 95%領域の各部分に対応する元のマスク領域を抽出
                 sub_region_mask = self._expand_region_to_original(
                     mask, sub_labels, sub_label, dist_transform, isDebug
                 )
@@ -173,7 +173,7 @@ class SalamiCircleDetectionService:
         isDebug: bool = False
     ) -> Optional[np.ndarray]:
         """
-        80%領域から元のマスク領域に拡張
+        95%領域から元のマスク領域に拡張
         
         Args:
             original_mask: 元のマスク
@@ -358,6 +358,8 @@ class SalamiCircleDetectionService:
     def detect_salami_circles(
         self, 
         image_path: str, 
+        preprocessed_image_path: str = None,
+        transform_info: dict = None,
         debug_output_dir: Optional[Path] = None, 
         base_name: str = "",
         isDebug: bool = False
@@ -366,7 +368,9 @@ class SalamiCircleDetectionService:
         画像からサラミの円形領域を検出（ピザとサラミのセグメンテーションを組み合わせ）
         
         Args:
-            image_path: 入力画像のパス
+            image_path: 元画像のパス
+            preprocessed_image_path: 前処理済み画像のパス（オプション）
+            transform_info: 前処理の変換情報
             debug_output_dir: デバッグ画像を保存するディレクトリ
             base_name: デバッグ画像のベース名
             isDebug: デバッグモード（Trueの場合、途中経過を保存）
@@ -376,26 +380,42 @@ class SalamiCircleDetectionService:
         """
         if isDebug:
             print(f"[DEBUG] サラミ円検出を開始: {image_path}")
-        # サラミマスクを取得
+        
+        # 元画像でサラミマスクを取得
         salami_mask = self._get_salami_mask(image_path, isDebug)
         
         if debug_output_dir and base_name and isDebug:
-            self._save_debug_image(salami_mask, debug_output_dir, base_name, "サラミマスク")
+            self._save_debug_image(salami_mask, debug_output_dir, base_name, "サラミマスク_元画像")
         
-        # ピザマスクを取得
+        # 元画像でピザマスクを取得
         pizza_mask = self.pizza_service.segment_pizza(image_path, isDebug=False)
         
         if debug_output_dir and base_name and isDebug:
-            self._save_debug_image(pizza_mask, debug_output_dir, base_name, "ピザマスク")
+            self._save_debug_image(pizza_mask, debug_output_dir, base_name, "ピザマスク_元画像")
         
         # マスクを結合（ピザ領域内のサラミのみを抽出）
-        final_mask = cv2.bitwise_and(salami_mask, pizza_mask)
+        combined_mask = cv2.bitwise_and(salami_mask, pizza_mask)
         
         if isDebug:
-            print(f"[DEBUG] 結合マスクのピクセル数: {np.sum(final_mask == 255)}")
+            print(f"[DEBUG] 元画像での結合マスクのピクセル数: {np.sum(combined_mask == 255)}")
         
-        if debug_output_dir and base_name and isDebug:
-            self._save_debug_image(final_mask, debug_output_dir, base_name, "結合マスク")
+        # 前処理が適用されている場合は、マスクにも同じ変換を適用
+        if preprocessed_image_path and transform_info and transform_info.get('is_transformed', False):
+            if isDebug:
+                print("[DEBUG] マスクに前処理変換を適用中...")
+            
+            # マスクに前処理を適用
+            final_mask = self._apply_preprocessing_to_mask(combined_mask, transform_info, isDebug)
+            
+            if debug_output_dir and base_name and isDebug:
+                self._save_debug_image(final_mask, debug_output_dir, base_name, "結合マスク_前処理済み")
+        else:
+            final_mask = combined_mask
+            if debug_output_dir and base_name and isDebug:
+                self._save_debug_image(final_mask, debug_output_dir, base_name, "結合マスク")
+        
+        if isDebug:
+            print(f"[DEBUG] 最終マスクのピクセル数: {np.sum(final_mask == 255)}")
         
         # マスクから円を検出
         circles = self.detect_circles_from_mask(final_mask, debug_output_dir, base_name, isDebug)
@@ -592,7 +612,7 @@ class SalamiCircleDetectionService:
         if isDebug:
             print("[DEBUG] サラミマスクを取得中...")
         
-        salami_result = self.salami_service.segment_salami(image_path, isDebug=False)
+        salami_result = self.salami_service.segment_salami(image_path)
         
         # 戻り値の型に応じて処理
         if isinstance(salami_result, tuple):
@@ -601,6 +621,61 @@ class SalamiCircleDetectionService:
             salami_mask = salami_result
         
         return salami_mask
+    
+    def _apply_preprocessing_to_mask(self, mask: np.ndarray, transform_info: dict, isDebug: bool = False) -> np.ndarray:
+        """
+        マスクに前処理と同じ変換を適用
+        
+        Args:
+            mask: 元のマスク
+            transform_info: 前処理の変換情報
+            isDebug: デバッグモード
+            
+        Returns:
+            変換後のマスク
+        """
+        if not transform_info.get('is_transformed', False):
+            return mask
+        
+        if isDebug:
+            print("[DEBUG] マスクに楕円→円変換を適用中...")
+        
+        # 変換情報を取得
+        transform_matrix = transform_info.get('transform_matrix')
+        crop_info = transform_info.get('crop_info')
+        scale_factor = transform_info.get('scale_factor', 1.0)
+        
+        if transform_matrix is None or crop_info is None:
+            if isDebug:
+                print("[DEBUG] 変換情報が不完全なため、元のマスクを返します")
+            return mask
+        
+        # ステップ1: アフィン変換を適用
+        mask_height, mask_width = mask.shape
+        transformed_mask = cv2.warpAffine(mask, transform_matrix, (mask_width, mask_height))
+        
+        if isDebug:
+            print(f"[DEBUG] アフィン変換後のマスクピクセル数: {np.sum(transformed_mask == 255)}")
+        
+        # ステップ2: クロップを適用
+        crop_x, crop_y, crop_w, crop_h = crop_info
+        cropped_mask = transformed_mask[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+        
+        if isDebug:
+            print(f"[DEBUG] クロップ後のマスクサイズ: {cropped_mask.shape}")
+            print(f"[DEBUG] クロップ後のマスクピクセル数: {np.sum(cropped_mask == 255)}")
+        
+        # ステップ3: リサイズして512x512に正規化
+        normalized_mask = cv2.resize(cropped_mask, (512, 512), interpolation=cv2.INTER_NEAREST)
+        
+        # バイナリマスクを再確保（リサイズで値が変わる可能性があるため）
+        normalized_mask = (normalized_mask > 127).astype(np.uint8) * 255
+        
+        if isDebug:
+            print(f"[DEBUG] 正規化後のマスクサイズ: {normalized_mask.shape}")
+            print(f"[DEBUG] 正規化後のマスクピクセル数: {np.sum(normalized_mask == 255)}")
+        
+        return normalized_mask
     
     def _draw_circle_info(
         self, 
@@ -733,10 +808,17 @@ def process_single_image(
         processed_image_path = str(temp_preprocessed_path)
     else:
         print("  変換は不要でした")
-        processed_image_path = str(image_path)
+        processed_image_path = None
     
-    # ステップ2: サラミの円を検出
-    circles = service.detect_salami_circles(processed_image_path, output_dir, base_name, isDebug)
+    # ステップ2: サラミの円を検出（元画像でマスク作成 + 前処理情報を渡す）
+    circles = service.detect_salami_circles(
+        str(image_path),  # 元画像パス
+        processed_image_path,  # 前処理済み画像パス  
+        info,  # 前処理の変換情報
+        output_dir, 
+        base_name, 
+        isDebug
+    )
     
     # ステップ3: 表示用の画像を準備
     display_image = preprocessed_image if info['is_transformed'] else cv2.imread(str(image_path))

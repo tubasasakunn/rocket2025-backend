@@ -371,6 +371,12 @@ class PreprocessService:
         if is_debug:
             print(f"[DEBUG] ピザに変換を適用中: 中心=({center_x}, {center_y}), 長軸={major_axis}, 短軸={minor_axis}, 角度={angle:.2f}°")
         
+        # 変換行列を生成
+        scale_x, scale_y = self.calculate_transform_scale(major_axis, minor_axis, is_debug)
+        transform_matrix = self._create_transformation_matrix(
+            (center_x, center_y), angle, (scale_x, scale_y), is_debug
+        )
+        
         # 画像を変換
         transformed = self.transform_image_to_circular(image, ellipse_params, is_debug)
 
@@ -379,10 +385,18 @@ class PreprocessService:
         
         info['is_transformed'] = True
         info['transformation_applied'] = {
-            'scale_x': minor_axis / major_axis,  # x軸（長軸）を縮小
-            'scale_y': 1.0,                      # y軸は変更なし
+            'scale_x': scale_x,                  # x軸（長軸）を縮小
+            'scale_y': scale_y,                  # y軸は変更なし
             'angle': angle                       # 元の楕円の角度
         }
+        info['transform_matrix'] = transform_matrix
+        info['crop_info'] = (
+            normalization_params['crop_region'][0],  # crop_x
+            normalization_params['crop_region'][1],  # crop_y  
+            normalization_params['crop_region'][2] - normalization_params['crop_region'][0],  # crop_w
+            normalization_params['crop_region'][3] - normalization_params['crop_region'][1]   # crop_h
+        )
+        info['scale_factor'] = normalization_params['scale_factor']
         info['normalization_params'] = normalization_params
         info['transformed_shape'] = transformed.shape
         
