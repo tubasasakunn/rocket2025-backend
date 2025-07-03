@@ -27,6 +27,13 @@ RUN mkdir -p uploads/process
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PORT=10000
+ENV RUNPOD_MODE=web
 
-# Run the application
-CMD uvicorn src.main:app --host 0.0.0.0 --port $PORT
+# Expose the port for Render
+EXPOSE 10000
+
+# Run the application with Gunicorn + Uvicorn workers (recommended for production)
+RUN pip install gunicorn
+
+# Use Gunicorn with Uvicorn workers for better performance and stability
+CMD ["sh", "-c", "gunicorn src.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 4 --timeout 120"]

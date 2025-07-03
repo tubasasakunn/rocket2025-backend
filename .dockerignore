@@ -25,7 +25,7 @@ debug/
 # Documentation
 docs/
 *.md
-README*
+!README.md
 
 # Development files
 .vscode/
@@ -38,10 +38,15 @@ docker-compose*.yml
 
 # Vercel specific (if not using)
 .vercel
+.vercelignore
 
 # Test files
 tests/
 test/
+
+# RunPod specific files (not needed for Render)
+runpod_handler.py
+RUNPOD_DEPLOY.md
 
 # GAS files
 gas/
