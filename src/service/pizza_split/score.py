@@ -1,359 +1,370 @@
-#!/usr/bin/env python
-# coding: utf-8
-"""
-スコア計算サービス
-ピザとサラミをセグメンテーションし、それぞれの面積を計算する
-"""
-
+#!/usr/bin/env python3
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import Tuple, Dict, Optional
-import json
+import sys
+import os
 
-from pizza_segmentation_service import PizzaSegmentationService
-from salami_segmentation_service import SalamiSegmentationService
-from preprocess import PreprocessService
+# プロジェクトルートをPythonパスに追加
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
+from src.service.pizza_split.pizza_segmentation_service import PizzaSegmentationService
+from src.service.pizza_split.salami_segmentation_service import SalamiSegmentationService
 
-class PizzaScoreCalculator:
-    """ピザとサラミの面積を計算するクラス"""
+def process_pizza_image(image_path, output_dir=None, isDebug=False):
+    """
+    Process pizza image through the complete pipeline:
+    1. Pizza segmentation
+    2. Salami segmentation
     
-    def __init__(self):
-        """サービスの初期化"""
-        self.pizza_service = PizzaSegmentationService()
-        self.salami_service = SalamiSegmentationService()
-        self.preprocess_service = PreprocessService()
+    Args:
+        image_path: Path to input image
+        output_dir: Directory to save output masks (optional)
+        isDebug: Enable debug output
         
-    def calculate_areas(self, image_path: str, use_preprocessing: bool = True, 
-                       debug: bool = False, save_masks: bool = False) -> Dict:
-        """
-        画像からピザとサラミの面積を計算
-        
-        Args:
-            image_path: 入力画像のパス
-            use_preprocessing: 前処理（楕円→円変換）を使用するか
-            debug: デバッグモード
-            save_masks: マスク画像を保存するか
-            
-        Returns:
-            {
-                'pizza_area_pixels': int,           # ピザの面積（ピクセル数）
-                'salami_area_pixels': int,          # サラミの面積（ピクセル数）
-                'salami_in_pizza_area_pixels': int, # ピザ内のサラミ面積（ピクセル数）
-                'total_image_pixels': int,          # 画像全体のピクセル数
-                'pizza_area_ratio': float,          # ピザの面積比率（0-1）
-                'salami_area_ratio': float,         # サラミの面積比率（0-1）
-                'salami_in_pizza_ratio': float,     # ピザ内でのサラミの割合（0-1）
-                'image_shape': tuple,               # 画像のshape (height, width, channels)
-                'preprocessing_applied': bool,       # 前処理が適用されたか
-                'masks': {                          # マスク画像（save_masks=Trueの場合）
-                    'pizza_mask': np.ndarray,
-                    'salami_mask': np.ndarray,
-                    'salami_in_pizza_mask': np.ndarray
-                }
-            }
-        """
-        # 画像パスの検証
-        image_path = Path(image_path)
-        if not image_path.exists():
-            raise FileNotFoundError(f"画像ファイルが見つかりません: {image_path}")
-        
-        if debug:
-            print(f"[DEBUG] 画像を処理中: {image_path}")
-        
-        # 処理する画像パスを決定
-        processed_image_path = str(image_path)
-        preprocess_info = None
-        
-        if use_preprocessing:
-            # 前処理を実行
-            if debug:
-                print("[DEBUG] 前処理を実行中...")
-            temp_path = Path("temp") / f"preprocessed_{image_path.name}"
-            temp_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            _, preprocess_info = self.preprocess_service.preprocess_pizza_image(
-                str(image_path), 
-                str(temp_path),
-                is_debug=debug
-            )
-            
-            if preprocess_info['is_transformed']:
-                processed_image_path = str(temp_path)
-                if debug:
-                    print("[DEBUG] 楕円→円変換を適用しました")
-        
-        # 画像を読み込んで基本情報を取得
-        image = cv2.imread(processed_image_path)
-        if image is None:
-            raise ValueError(f"画像を読み込めませんでした: {processed_image_path}")
-        
-        image_shape = image.shape
-        total_pixels = image_shape[0] * image_shape[1]
-        
-        if debug:
-            print(f"[DEBUG] 画像サイズ: {image_shape}")
-            print(f"[DEBUG] 総ピクセル数: {total_pixels:,}")
-        
-        # ピザのセグメンテーション
-        if debug:
-            print("[DEBUG] ピザをセグメンテーション中...")
-        pizza_mask = self.pizza_service.segment_pizza(processed_image_path, isDebug=False)
-        pizza_area_pixels = np.sum(pizza_mask == 255)
-        
-        if debug:
-            print(f"[DEBUG] ピザ面積: {pizza_area_pixels:,} pixels")
-        
-        # サラミのセグメンテーション
-        if debug:
-            print("[DEBUG] サラミをセグメンテーション中...")
-        salami_result = self.salami_service.segment_salami(
-            processed_image_path, 
-            pizza_mask=pizza_mask,
-            isDebug=False
-        )
-        
-        # サラミセグメンテーションの戻り値を処理
-        if isinstance(salami_result, tuple):
-            salami_mask, _ = salami_result
-        else:
-            salami_mask = salami_result
-        
-        salami_area_pixels = np.sum(salami_mask == 255)
-        
-        if debug:
-            print(f"[DEBUG] サラミ面積: {salami_area_pixels:,} pixels")
-        
-        # ピザ内のサラミ面積を計算（AND演算）
-        salami_in_pizza_mask = cv2.bitwise_and(salami_mask, pizza_mask)
-        salami_in_pizza_area_pixels = np.sum(salami_in_pizza_mask == 255)
-        
-        if debug:
-            print(f"[DEBUG] ピザ内のサラミ面積: {salami_in_pizza_area_pixels:,} pixels")
-        
-        # 面積比率を計算
-        pizza_area_ratio = pizza_area_pixels / total_pixels
-        salami_area_ratio = salami_area_pixels / total_pixels
-        salami_in_pizza_ratio = salami_in_pizza_area_pixels / pizza_area_pixels if pizza_area_pixels > 0 else 0
-        
-        # 結果をまとめる
-        result = {
-            'pizza_area_pixels': int(pizza_area_pixels),
-            'salami_area_pixels': int(salami_area_pixels),
-            'salami_in_pizza_area_pixels': int(salami_in_pizza_area_pixels),
-            'total_image_pixels': int(total_pixels),
-            'pizza_area_ratio': float(pizza_area_ratio),
-            'salami_area_ratio': float(salami_area_ratio),
-            'salami_in_pizza_ratio': float(salami_in_pizza_ratio),
-            'image_shape': image_shape,
-            'preprocessing_applied': use_preprocessing and preprocess_info and preprocess_info['is_transformed']
-        }
-        
-        # マスクを保存する場合
-        if save_masks:
-            result['masks'] = {
-                'pizza_mask': pizza_mask,
-                'salami_mask': salami_mask,
-                'salami_in_pizza_mask': salami_in_pizza_mask
-            }
-        
-        # 一時ファイルを削除
-        if use_preprocessing and Path(processed_image_path) != image_path:
-            try:
-                Path(processed_image_path).unlink()
-            except:
-                pass
-        
-        return result
+    Returns:
+        dict: Contains original image, pizza mask, salami mask
+    """
+    image_path = Path(image_path)
+    if not image_path.exists():
+        raise FileNotFoundError(f"Image not found: {image_path}")
     
-    def calculate_areas_batch(self, image_paths: list, use_preprocessing: bool = True,
-                            debug: bool = False) -> Dict[str, Dict]:
-        """
-        複数の画像をバッチ処理
-        
-        Args:
-            image_paths: 画像パスのリスト
-            use_preprocessing: 前処理を使用するか
-            debug: デバッグモード
-            
-        Returns:
-            各画像の結果を含む辞書
-        """
-        results = {}
-        
-        for image_path in image_paths:
-            try:
-                if debug:
-                    print(f"\n処理中: {image_path}")
-                
-                result = self.calculate_areas(
-                    image_path,
-                    use_preprocessing=use_preprocessing,
-                    debug=debug,
-                    save_masks=False
-                )
-                results[str(image_path)] = result
-                
-            except Exception as e:
-                print(f"エラー: {image_path} - {e}")
-                results[str(image_path)] = {'error': str(e)}
-        
-        return results
-    
-    def save_visualization(self, image_path: str, output_dir: str = "result/score",
-                         use_preprocessing: bool = True) -> Dict[str, str]:
-        """
-        セグメンテーション結果を可視化して保存
-        
-        Args:
-            image_path: 入力画像パス
-            output_dir: 出力ディレクトリ
-            use_preprocessing: 前処理を使用するか
-            
-        Returns:
-            保存されたファイルパスの辞書
-        """
-        # 出力ディレクトリを作成
+    if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+    
+    results = {}
+    
+    # Initialize services
+    pizza_service = PizzaSegmentationService()
+    salami_service = SalamiSegmentationService()
+    
+    # Load original image
+    original_image = cv2.imread(str(image_path))
+    results['original_image'] = original_image
+    
+    # Step 1: Pizza segmentation
+    print(f"Step 1: Segmenting pizza...")
+    pizza_mask = pizza_service.segment_pizza(str(image_path), isDebug=isDebug)
+    results['pizza_mask'] = pizza_mask
+    print(f"  Pizza segmentation complete. Mask shape: {pizza_mask.shape}")
+    
+    # Step 2: Salami segmentation
+    print(f"Step 2: Segmenting salami...")
+    salami_result = salami_service.segment_salami(
+        str(image_path), 
+        pizza_mask=pizza_mask,
+        debug_output_dir=output_dir if output_dir and isDebug else None,
+        base_name=image_path.stem,
+        isDebug=isDebug
+    )
+    if isinstance(salami_result, tuple):
+        salami_mask, salami_debug_info = salami_result
+        results['salami_debug_info'] = salami_debug_info
+    else:
+        salami_mask = salami_result
+    results['salami_mask'] = salami_mask
+    print(f"  Salami segmentation complete. Mask shape: {salami_mask.shape}")
+    
+    # Step 3: Analyze each pizza region separately
+    print(f"\nStep 3: Analyzing each pizza region...")
+    region_stats = analyze_pizza_regions(pizza_mask, salami_mask)
+    results['region_stats'] = region_stats
+    
+    # Save masks if output directory specified
+    if output_dir:
+        # Save individual masks
+        cv2.imwrite(str(output_dir / "pizza_mask.png"), pizza_mask)
+        cv2.imwrite(str(output_dir / "salami_mask.png"), salami_mask)
+        cv2.imwrite(str(output_dir / "original.jpg"), original_image)
         
-        # 面積計算（マスクも取得）
-        result = self.calculate_areas(
-            image_path,
-            use_preprocessing=use_preprocessing,
-            debug=False,
-            save_masks=True
+        # Create overlay visualization
+        overlay = create_overlay_visualization(
+            original_image, 
+            pizza_mask, 
+            salami_mask
         )
-        
-        # 元画像を読み込み
-        image = cv2.imread(str(image_path))
-        base_name = Path(image_path).stem
-        
-        saved_paths = {}
-        
-        # 1. ピザマスクを保存
-        pizza_mask_path = output_dir / f"{base_name}_pizza_mask.png"
-        cv2.imwrite(str(pizza_mask_path), result['masks']['pizza_mask'])
-        saved_paths['pizza_mask'] = str(pizza_mask_path)
-        
-        # 2. サラミマスクを保存
-        salami_mask_path = output_dir / f"{base_name}_salami_mask.png"
-        cv2.imwrite(str(salami_mask_path), result['masks']['salami_mask'])
-        saved_paths['salami_mask'] = str(salami_mask_path)
-        
-        # 3. ピザ内サラミマスクを保存
-        salami_in_pizza_path = output_dir / f"{base_name}_salami_in_pizza_mask.png"
-        cv2.imwrite(str(salami_in_pizza_path), result['masks']['salami_in_pizza_mask'])
-        saved_paths['salami_in_pizza_mask'] = str(salami_in_pizza_path)
-        
-        # 4. オーバーレイ画像を作成
-        overlay = image.copy()
-        
-        # ピザ領域を黄色でハイライト
-        pizza_colored = np.zeros_like(image)
-        pizza_colored[result['masks']['pizza_mask'] == 255] = [0, 255, 255]  # 黄色（BGR）
-        overlay = cv2.addWeighted(overlay, 0.7, pizza_colored, 0.3, 0)
-        
-        # サラミ領域を赤色でハイライト
-        salami_colored = np.zeros_like(image)
-        salami_colored[result['masks']['salami_in_pizza_mask'] == 255] = [0, 0, 255]  # 赤色（BGR）
-        overlay = cv2.addWeighted(overlay, 0.7, salami_colored, 0.3, 0)
-        
-        overlay_path = output_dir / f"{base_name}_overlay.jpg"
-        cv2.imwrite(str(overlay_path), overlay)
-        saved_paths['overlay'] = str(overlay_path)
-        
-        # 5. 結果をテキストファイルに保存
-        info_path = output_dir / f"{base_name}_areas.txt"
-        with open(info_path, 'w', encoding='utf-8') as f:
-            f.write(f"画像: {image_path}\n")
-            f.write(f"画像サイズ: {result['image_shape']}\n")
-            f.write(f"総ピクセル数: {result['total_image_pixels']:,}\n")
-            f.write(f"\n")
-            f.write(f"ピザ面積: {result['pizza_area_pixels']:,} pixels ({result['pizza_area_ratio']:.1%})\n")
-            f.write(f"サラミ面積: {result['salami_area_pixels']:,} pixels ({result['salami_area_ratio']:.1%})\n")
-            f.write(f"ピザ内サラミ面積: {result['salami_in_pizza_area_pixels']:,} pixels\n")
-            f.write(f"ピザ内でのサラミ割合: {result['salami_in_pizza_ratio']:.1%}\n")
-            f.write(f"\n")
-            f.write(f"前処理適用: {'Yes' if result['preprocessing_applied'] else 'No'}\n")
-        saved_paths['info'] = str(info_path)
-        
-        # 6. JSON形式でも保存
-        json_path = output_dir / f"{base_name}_areas.json"
-        json_result = {k: v for k, v in result.items() if k != 'masks'}
-        json_result['image_shape'] = list(json_result['image_shape'])  # tupleをlistに変換
-        
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(json_result, f, indent=2, ensure_ascii=False)
-        saved_paths['json'] = str(json_path)
-        
-        return saved_paths
+        cv2.imwrite(str(output_dir / "overlay_result.png"), overlay)
+        print(f"  Saved results to {output_dir}")
+    
+    return results
 
-
-def main():
-    """メイン関数"""
-    # スコア計算機を初期化
-    calculator = PizzaScoreCalculator()
+def create_overlay_visualization(image, pizza_mask, salami_mask):
+    """
+    Create an overlay visualization showing original image with colored masks
     
-    # テスト画像
-    test_images = [
-        "resource/pizza1.jpg",
-        "resource/pizza2.jpg"
-    ]
-    
-    print("=== Pizza Score Calculator ===\n")
-    
-    # 各画像を処理
-    for image_path in test_images:
-        if not Path(image_path).exists():
-            print(f"画像が見つかりません: {image_path}")
-            continue
+    Args:
+        image: Original/preprocessed image
+        pizza_mask: Binary mask for pizza
+        salami_mask: Binary mask for salami
         
-        print(f"\n処理中: {image_path}")
-        print("-" * 50)
-        
-        try:
-            # 面積を計算
-            result = calculator.calculate_areas(
-                image_path,
-                use_preprocessing=True,
-                debug=True
-            )
-            
-            # 結果を表示
-            print("\n【計算結果】")
-            print(f"画像サイズ: {result['image_shape']}")
-            print(f"総ピクセル数: {result['total_image_pixels']:,}")
-            print(f"\nピザ面積: {result['pizza_area_pixels']:,} pixels ({result['pizza_area_ratio']:.1%})")
-            print(f"サラミ面積: {result['salami_area_pixels']:,} pixels ({result['salami_area_ratio']:.1%})")
-            print(f"ピザ内サラミ面積: {result['salami_in_pizza_area_pixels']:,} pixels")
-            print(f"ピザ内でのサラミ割合: {result['salami_in_pizza_ratio']:.1%}")
-            
-            # 可視化を保存
-            print("\n可視化を保存中...")
-            saved_paths = calculator.save_visualization(image_path)
-            print("保存されたファイル:")
-            for key, path in saved_paths.items():
-                print(f"  - {key}: {path}")
-            
-        except Exception as e:
-            print(f"エラーが発生しました: {e}")
-            import traceback
-            traceback.print_exc()
+    Returns:
+        Overlay image with colored masks
+    """
+    # Create colored overlay
+    overlay = image.copy()
     
-    # バッチ処理の例
-    print("\n\n=== バッチ処理の例 ===")
-    batch_results = calculator.calculate_areas_batch(test_images, debug=False)
+    # Create colored masks
+    pizza_color = np.zeros_like(image)
+    pizza_color[:, :, 1] = pizza_mask  # Green for pizza
     
-    for image_path, result in batch_results.items():
-        print(f"\n{image_path}:")
-        if 'error' in result:
-            print(f"  エラー: {result['error']}")
-        else:
-            print(f"  ピザ面積: {result['pizza_area_ratio']:.1%}")
-            print(f"  サラミ割合: {result['salami_in_pizza_ratio']:.1%}")
+    salami_color = np.zeros_like(image)
+    salami_color[:, :, 2] = salami_mask  # Red for salami
+    
+    # Apply masks with transparency
+    alpha = 0.3
+    
+    # Apply pizza mask if there are any pizza pixels
+    pizza_mask_area = pizza_mask > 0
+    if np.any(pizza_mask_area):
+        pizza_overlay = cv2.addWeighted(
+            overlay, 1-alpha, 
+            pizza_color, alpha, 0
+        )
+        overlay[pizza_mask_area] = pizza_overlay[pizza_mask_area]
+    
+    # Apply salami mask if there are any salami pixels
+    salami_mask_area = salami_mask > 0
+    if np.any(salami_mask_area):
+        salami_overlay = cv2.addWeighted(
+            overlay, 1-alpha*2, 
+            salami_color, alpha*2, 0
+        )
+        overlay[salami_mask_area] = salami_overlay[salami_mask_area]
+    
+    # Add legend
+    legend_height = 60
+    legend = np.ones((legend_height, overlay.shape[1], 3), dtype=np.uint8) * 255
+    cv2.putText(legend, "Pizza (Green)", (10, 25), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 0), 2)
+    cv2.putText(legend, "Salami (Red)", (10, 50), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 200), 2)
+    
+    # Combine image and legend
+    result = np.vstack([overlay, legend])
+    
+    return result
 
+def calculate_scores(pizza_mask, salami_mask):
+    """
+    Calculate various scores from the masks
+    
+    Args:
+        pizza_mask: Binary mask for pizza
+        salami_mask: Binary mask for salami
+        
+    Returns:
+        dict: Various calculated scores
+    """
+    scores = {}
+    
+    # Calculate areas
+    pizza_area = np.sum(pizza_mask > 0)
+    salami_area = np.sum(salami_mask > 0)
+    
+    scores['pizza_area_pixels'] = pizza_area
+    scores['salami_area_pixels'] = salami_area
+    scores['salami_coverage_ratio'] = salami_area / pizza_area if pizza_area > 0 else 0
+    scores['salami_coverage_percent'] = scores['salami_coverage_ratio'] * 100
+    
+    # Calculate salami distribution (simple quadrant analysis)
+    h, w = pizza_mask.shape
+    mid_h, mid_w = h // 2, w // 2
+    
+    quadrants = {
+        'top_left': salami_mask[:mid_h, :mid_w],
+        'top_right': salami_mask[:mid_h, mid_w:],
+        'bottom_left': salami_mask[mid_h:, :mid_w],
+        'bottom_right': salami_mask[mid_h:, mid_w:]
+    }
+    
+    quadrant_scores = {}
+    for name, quadrant in quadrants.items():
+        quadrant_scores[name] = np.sum(quadrant > 0)
+    
+    scores['quadrant_distribution'] = quadrant_scores
+    
+    # Calculate distribution uniformity (standard deviation of quadrant scores)
+    quadrant_values = list(quadrant_scores.values())
+    scores['distribution_std'] = np.std(quadrant_values)
+    scores['distribution_uniformity'] = 1 - (scores['distribution_std'] / np.mean(quadrant_values)) if np.mean(quadrant_values) > 0 else 0
+    
+    return scores
+
+def calculate_fairness_score(pizza_pixels_list, salami_pixels_list, pizza_weight=0.3, salami_weight=0.7):
+    """
+    Calculate fairness score based on standard deviation of pizza and salami distribution
+    
+    Args:
+        pizza_pixels_list: List of pizza pixels per region
+        salami_pixels_list: List of salami pixels per region
+        pizza_weight: Weight for pizza fairness (default 0.3)
+        salami_weight: Weight for salami fairness (default 0.7)
+        
+    Returns:
+        Fairness score from 0 to 100 (100 = perfectly fair, 0 = very unfair)
+    """
+    if len(pizza_pixels_list) <= 1:
+        return 100.0  # Single region is perfectly fair by definition
+    
+    # Calculate coefficient of variation (CV) for normalization
+    # CV = std / mean, which is scale-independent
+    mean_pizza = np.mean(pizza_pixels_list)
+    mean_salami = np.mean(salami_pixels_list)
+    
+    cv_pizza = np.std(pizza_pixels_list) / mean_pizza if mean_pizza > 0 else 0
+    cv_salami = np.std(salami_pixels_list) / mean_salami if mean_salami > 0 else 0
+    
+    # Convert CV to fairness score using exponential decay
+    # Score = 100 * exp(-k * CV), where k controls the decay rate
+    k = 3.0  # Decay rate (adjust to control sensitivity)
+    
+    pizza_fairness = 100 * np.exp(-k * cv_pizza)
+    salami_fairness = 100 * np.exp(-k * cv_salami)
+    
+    # Weighted average
+    total_weight = pizza_weight + salami_weight
+    fairness_score = (pizza_weight * pizza_fairness + salami_weight * salami_fairness) / total_weight
+    
+    return fairness_score
+
+def analyze_pizza_regions(pizza_mask, salami_mask):
+    """
+    Analyze each connected pizza region separately
+    
+    Args:
+        pizza_mask: Binary mask for pizza regions
+        salami_mask: Binary mask for salami regions
+        
+    Returns:
+        Dictionary containing:
+        - regions: List of stats for each region
+        - std_pizza: Standard deviation of pizza pixels across regions
+        - std_salami: Standard deviation of salami pixels across regions
+    """
+    # Find connected components in pizza mask
+    num_labels, labels = cv2.connectedComponents(pizza_mask.astype(np.uint8))
+    
+    region_stats = []
+    pizza_pixels_list = []
+    salami_pixels_list = []
+    
+    print(f"  Found {num_labels - 1} pizza regions")
+    
+    for label in range(1, num_labels):  # Skip background (label 0)
+        # Create mask for current region
+        region_mask = (labels == label).astype(np.uint8) * 255
+        
+        # Calculate pizza pixels in this region
+        pizza_pixels = np.sum(region_mask > 0)
+        
+        # Calculate salami pixels in this region (intersection)
+        salami_in_region = cv2.bitwise_and(region_mask, salami_mask)
+        salami_pixels = np.sum(salami_in_region > 0)
+        
+        # Calculate coverage
+        coverage = salami_pixels / pizza_pixels if pizza_pixels > 0 else 0
+        
+        stats = {
+            'region_id': label,
+            'pizza_pixels': pizza_pixels,
+            'salami_pixels': salami_pixels,
+            'coverage_ratio': coverage,
+            'coverage_percent': coverage * 100
+        }
+        
+        region_stats.append(stats)
+        pizza_pixels_list.append(pizza_pixels)
+        salami_pixels_list.append(salami_pixels)
+        
+        print(f"  Region {label}:")
+        print(f"    - Pizza pixels: {pizza_pixels:,}")
+        print(f"    - Salami pixels: {salami_pixels:,}")
+        print(f"    - Coverage: {coverage * 100:.1f}%")
+    
+    # Calculate standard deviations
+    std_pizza = np.std(pizza_pixels_list) if len(pizza_pixels_list) > 1 else 0
+    std_salami = np.std(salami_pixels_list) if len(salami_pixels_list) > 1 else 0
+    
+    print(f"\n  Standard deviations across regions:")
+    print(f"    - Pizza pixels std: {std_pizza:,.1f}")
+    print(f"    - Salami pixels std: {std_salami:,.1f}")
+    
+    # Calculate fairness score
+    fairness_score = calculate_fairness_score(
+        pizza_pixels_list, salami_pixels_list, 
+        pizza_weight=0.3, salami_weight=0.7
+    )
+    
+    print(f"\n  Fairness Score: {fairness_score:.1f} / 100")
+    
+    return {
+        'regions': region_stats,
+        'std_pizza': std_pizza,
+        'std_salami': std_salami,
+        'pizza_pixels_list': pizza_pixels_list,
+        'salami_pixels_list': salami_pixels_list,
+        'fairness_score': fairness_score
+    }
 
 if __name__ == "__main__":
-    main()
+    # Process cutted1.jpg with morphological separation
+    image_path = "resource/cutted1.jpg"
+    output_dir = "result/score_output_cutted1_morph"
+    
+    print(f"Processing {image_path}...")
+    print("=" * 50)
+    
+    try:
+        # Process the image
+        results = process_pizza_image(
+            image_path, 
+            output_dir=output_dir,
+            isDebug=True
+        )
+        
+        # Calculate scores
+        scores = calculate_scores(
+            results['pizza_mask'], 
+            results['salami_mask']
+        )
+        
+        print("\n" + "=" * 50)
+        print("SCORING RESULTS:")
+        print("=" * 50)
+        print(f"Pizza area: {scores['pizza_area_pixels']:,} pixels")
+        print(f"Salami area: {scores['salami_area_pixels']:,} pixels")
+        print(f"Salami coverage: {scores['salami_coverage_percent']:.1f}%")
+        print(f"\nQuadrant distribution:")
+        for quadrant, value in scores['quadrant_distribution'].items():
+            print(f"  {quadrant}: {value:,} pixels")
+        print(f"\nDistribution uniformity: {scores['distribution_uniformity']:.2f} (0=uneven, 1=perfect)")
+        
+        # Print per-region statistics
+        print("\n" + "=" * 50)
+        print("PER-REGION STATISTICS:")
+        print("=" * 50)
+        for region in results['region_stats']['regions']:
+            print(f"Region {region['region_id']}:")
+            print(f"  Pizza area: {region['pizza_pixels']:,} pixels")
+            print(f"  Salami area: {region['salami_pixels']:,} pixels")
+            print(f"  Salami coverage: {region['coverage_percent']:.1f}%")
+        
+        print(f"\nREGION BALANCE METRICS:")
+        print(f"  Pizza area std deviation: {results['region_stats']['std_pizza']:,.1f} pixels")
+        print(f"  Salami area std deviation: {results['region_stats']['std_salami']:,.1f} pixels")
+        print(f"  FAIRNESS SCORE: {results['region_stats']['fairness_score']:.1f} / 100")
+        print(f"    (Pizza weight: 30%, Salami weight: 70%)")
+        
+        print(f"\nAll results saved to: {output_dir}")
+        print("  - pizza_mask.png: Pizza segmentation mask")
+        print("  - salami_mask.png: Salami segmentation mask")
+        print("  - original.jpg: Original image")
+        print("  - overlay_result.png: Overlay visualization")
+        
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        import traceback
+        traceback.print_exc()
