@@ -151,22 +151,22 @@ async def get_user_by_account(
 
 
 @router.get("/{user_id}", response_model=UserRecordResponse)
-async def get_user_by_account(
-    account: str,
+async def get_user_by_id(
+    user_id: int,
     service: UserRecordService = Depends(get_user_record_service)
 ):
     """
-    アカウント名によるユーザー検索
+    ユーザーIDによるユーザー検索
     
-    指定されたアカウント名のユーザーレコードを取得します。
+    指定されたユーザーIDのユーザーレコードを取得します。
     """
     try:
-        user = await service.get_user_by_account(account)
+        user = await service.get_user_by_id(user_id)
         if not user:
-            raise HTTPException(status_code=404, detail=f"User with account '{account}' not found")
+            raise HTTPException(status_code=404, detail=f"User with user_id '{user_id}' not found")
         return user
     except GasClientException as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get user: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get user_id: {str(e)}")
 
 
 @router.post("/", response_model=UserRecordResponse)
