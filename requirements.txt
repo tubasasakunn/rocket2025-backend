@@ -31,3 +31,10 @@ pathlib>=1.0.1
 Pillow>=9.0.0  # For image processing
 setuptools>=65.0.0  # For packaging
 wheel>=0.38.0  # For packaging
+
+gunicorn==20.1.0
+matplotlib>=3.8.0
+fer==22.5.1
+tensorflow==2.15.0
+scipy>=1.10.0
+
