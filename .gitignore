@@ -67,3 +67,4 @@ animated_pizza_output/
 *.json
 
 pizza_overlay.png
+debug/
