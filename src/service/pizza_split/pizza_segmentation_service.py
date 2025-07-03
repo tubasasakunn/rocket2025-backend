@@ -120,7 +120,58 @@ class PizzaSegmentationService:
             print(f"[DEBUG] 検出されたピザの総数: {pizza_count}")
             print(f"[DEBUG] マスクのピクセル数: {np.sum(mask == 255)}")
         
+        # 縮小→膨張処理で細くつながっている箇所を断ち切る
+        if np.sum(mask == 255) > 0:
+            mask = self._apply_morphological_separation(mask, isDebug)
+        
         return mask
+    
+    def _apply_morphological_separation(self, mask: np.ndarray, isDebug: bool = False) -> np.ndarray:
+        """
+        縮小→膨張処理で細くつながっている箇所を断ち切る
+        
+        Args:
+            mask: 入力バイナリマスク
+            isDebug: デバッグモード
+            
+        Returns:
+            処理後のバイナリマスク
+        """
+        if isDebug:
+            print(f"[DEBUG] 形態学的分離処理を開始")
+            
+        # 元のマスクのコピーを作成
+        processed_mask = mask.copy()
+        
+        # カーネルサイズを設定（細い接続を切るために適切なサイズ）
+        kernel_size = 32
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        
+        # 縮小処理（エロージョン）- 細い接続を断ち切る
+        eroded = cv2.erode(processed_mask, kernel, iterations=1)
+        
+        if isDebug:
+            eroded_pixels = np.sum(eroded == 255)
+            print(f"[DEBUG] 縮小後のピクセル数: {eroded_pixels}")
+            
+            # デバッグ画像を保存
+            debug_dir = Path("debug")
+            debug_dir.mkdir(exist_ok=True)
+            cv2.imwrite(str(debug_dir / "pizza_mask_eroded.png"), eroded)
+        
+        # 膨張処理（ダイレーション）- 元のサイズに近づける
+        dilated = cv2.dilate(eroded, kernel, iterations=1)
+        
+        if isDebug:
+            dilated_pixels = np.sum(dilated == 255)
+            print(f"[DEBUG] 膨張後のピクセル数: {dilated_pixels}")
+            cv2.imwrite(str(debug_dir / "pizza_mask_dilated.png"), dilated)
+            
+            # 連結成分の数を確認
+            num_labels, labels = cv2.connectedComponents(dilated)
+            print(f"[DEBUG] 分離後の連結成分数: {num_labels - 1}")  # 背景を除く
+        
+        return dilated
     
     def save_mask(self, mask: np.ndarray, output_path: str, isDebug: bool = False):
         """

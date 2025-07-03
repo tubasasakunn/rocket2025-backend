@@ -14,6 +14,7 @@ from service.pizza_split.salami_segmentation_service import SalamiSegmentationSe
 from service.pizza_split.salami_circle_detection_service import SalamiCircleDetectionService
 from service.pizza_split.preprocess import PreprocessService
 from service.pizza_split.process import PizzaProcessor
+# from service.pizza_split.score import process_pizza_image, analyze_pizza_regions, calculate_scores, calculate_fairness_score
 
 
 # モデル定義
@@ -41,6 +42,13 @@ class HealthCheckResponse(BaseModel):
     status: str
     message: str
     services_available: List[str]
+
+
+class PizzaScoreResponse(BaseModel):
+    """ピザスコア計算結果のレスポンス"""
+    success: bool
+    fairness_score: float = Field(description="公平性スコア（0-100）")
+    error_message: Optional[str] = None
 
 
 # ルーター作成
@@ -403,3 +411,140 @@ async def test_with_sample_images():
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/score", response_model=PizzaScoreResponse)
+async def calculate_pizza_score(
+    file: UploadFile = File(..., description="ピザの画像ファイル (JPG, PNG)")
+):
+    """
+    ピザ画像の公平性スコアを計算
+    
+    アップロードされた画像に対して以下の処理を実行:
+    1. ピザ領域の検出（形態学的分離処理付き）
+    2. サラミの検出
+    3. 各領域ごとのピザ・サラミ面積計算
+    4. 標準偏差に基づく公平性スコアの算出
+    
+    Returns:
+        - 全体のピザ・サラミ面積
+        - 各領域の詳細情報
+        - 公平性スコア（0-100: 100が完全に公平）
+    """
+    
+    # ファイル形式チェック
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="画像ファイルをアップロードしてください")
+    
+    # 一意のファイル名生成
+    file_id = str(uuid.uuid4())
+    file_extension = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
+    upload_path = UPLOAD_DIR / f"{file_id}{file_extension}"
+    output_dir = UPLOAD_DIR / "score_output" / file_id
+    
+    try:
+        # ファイル保存
+        with open(upload_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        import cv2
+        
+        # サービスを初期化
+        pizza_service = get_pizza_segmentation_service()
+        salami_service = get_salami_segmentation_service()
+        
+        # 画像を読み込み
+        original_image = cv2.imread(str(upload_path))
+        
+        # 1. ピザセグメンテーション
+        pizza_mask = pizza_service.segment_pizza(str(upload_path), isDebug=False)
+        
+        # 2. サラミセグメンテーション
+        salami_result = salami_service.segment_salami(
+            str(upload_path),
+            pizza_mask=pizza_mask,
+            debug_output_dir=None,
+            base_name=upload_path.stem,
+            isDebug=False
+        )
+        
+        if isinstance(salami_result, tuple):
+            salami_mask, _ = salami_result
+        else:
+            salami_mask = salami_result
+        
+        # 3. 各領域の分析
+        num_labels, labels = cv2.connectedComponents(pizza_mask.astype(np.uint8))
+        
+        region_stats = []
+        pizza_pixels_list = []
+        salami_pixels_list = []
+        
+        for label in range(1, num_labels):
+            region_mask = (labels == label).astype(np.uint8) * 255
+            pizza_pixels = int(np.sum(region_mask > 0))
+            
+            salami_in_region = cv2.bitwise_and(region_mask, salami_mask)
+            salami_pixels = int(np.sum(salami_in_region > 0))
+            
+            coverage = salami_pixels / pizza_pixels if pizza_pixels > 0 else 0
+            
+            region_stats.append({
+                'region_id': label,
+                'pizza_pixels': pizza_pixels,
+                'salami_pixels': salami_pixels,
+                'coverage_ratio': coverage,
+                'coverage_percent': coverage * 100
+            })
+            
+            pizza_pixels_list.append(pizza_pixels)
+            salami_pixels_list.append(salami_pixels)
+        
+        # 4. 標準偏差とfairness scoreの計算
+        std_pizza = float(np.std(pizza_pixels_list)) if len(pizza_pixels_list) > 1 else 0.0
+        std_salami = float(np.std(salami_pixels_list)) if len(salami_pixels_list) > 1 else 0.0
+        
+        # Fairness score計算
+        if len(pizza_pixels_list) > 1:
+            mean_pizza = np.mean(pizza_pixels_list)
+            mean_salami = np.mean(salami_pixels_list)
+            
+            cv_pizza = std_pizza / mean_pizza if mean_pizza > 0 else 0
+            cv_salami = std_salami / mean_salami if mean_salami > 0 else 0
+            
+            k = 3.0
+            pizza_fairness = 100 * np.exp(-k * cv_pizza)
+            salami_fairness = 100 * np.exp(-k * cv_salami)
+            
+            fairness_score = 0.3 * pizza_fairness + 0.7 * salami_fairness
+        else:
+            fairness_score = 100.0
+        
+        # 5. 全体の統計
+        total_pizza_area = int(np.sum(pizza_mask > 0))
+        total_salami_area = int(np.sum(salami_mask > 0))
+        salami_coverage_percent = (total_salami_area / total_pizza_area * 100) if total_pizza_area > 0 else 0.0
+        
+        return PizzaScoreResponse(
+            success=True,
+            fairness_score=fairness_score
+        )
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return PizzaScoreResponse(
+            success=False,
+            fairness_score=0.0,
+            error_message=str(e)
+        )
+    
+    finally:
+        # クリーンアップ
+        try:
+            if upload_path.exists():
+                upload_path.unlink()
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+        except Exception:
+            pass
