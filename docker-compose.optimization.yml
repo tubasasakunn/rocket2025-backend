@@ -1,0 +1,20 @@
+# filepath: /Users/ryosukeanzai/src/github.com/tubasasakunn/rocket2025-backend/docker-compose.optimization.yml
+version: '3'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.improved
+    environment:
+      - YOLO_CONFIG_DIR=/app/config/ultralytics
+      - LOG_LEVEL=INFO  # Reduce verbosity in production
+    volumes:
+      # Persistent volumes for caches to improve restart performance
+      - ultralytics_cache:/app/config/ultralytics
+      - matplotlib_cache:/root/.cache/matplotlib
+
+# Define persistent volumes
+volumes:
+  ultralytics_cache:
+  matplotlib_cache:

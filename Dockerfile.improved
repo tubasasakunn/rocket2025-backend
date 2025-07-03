@@ -1,0 +1,59 @@
+FROM python:3.11.9-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create and set permissions for Ultralytics config directory
+RUN mkdir -p /root/.config/Ultralytics && chmod -R 777 /root/.config
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+# Split heavy dependencies for better layer caching
+RUN pip install --no-cache-dir --timeout=300 --retries=3 torch torchvision tensorflow
+RUN pip install --no-cache-dir --timeout=300 --retries=3 -r requirements.txt
+
+# Pre-generate Matplotlib font cache to avoid runtime warning
+RUN python -c "import matplotlib.pyplot as plt; plt.figure(); plt.close()"
+
+# Copy YOLOv8 model
+COPY yolov8n-seg.pt .
+
+# Copy application code
+COPY . .
+
+# Create uploads directory
+RUN mkdir -p uploads/process
+
+# Make entrypoint script executable
+RUN chmod +x /app/entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=10000
+ENV RUNPOD_MODE=web
+ENV PYTHONPATH=/app
+# Set a specific directory for YOLO configuration
+ENV YOLO_CONFIG_DIR=/app/config/ultralytics
+
+# Create and set permissions for the custom YOLO config directory
+RUN mkdir -p /app/config/ultralytics && chmod -R 777 /app/config/ultralytics
+
+# Expose the port for Render
+EXPOSE 10000
+
+# Run the application with Gunicorn + Uvicorn workers (recommended for production)
+RUN pip install gunicorn
+
+# Use Gunicorn with Uvicorn workers for better performance and stability
+CMD gunicorn src.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 4 --timeout 120
